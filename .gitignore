@@ -1,0 +1,9 @@
+.env
+client_secrets.json
+venv/
+*.pyc
+__pycache__/
+*.sql
+*.xlsx
+.gitignore/
+playsync.egg-info/
