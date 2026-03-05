@@ -329,3 +329,45 @@ def get_events_with_mapping_filtered(user_id: int) -> list[dict]:
         len(rows), user_id,
     )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# User management
+# ---------------------------------------------------------------------------
+
+def upsert_user(google_sub: str, email: str, refresh_token: str) -> int:
+    """
+    Insert a new user or update their refresh_token if they already exist.
+
+    Uses google_sub as the conflict key — if the same Google account
+    signs in again, only the refresh_token is refreshed.
+
+    Args:
+        google_sub:     Google's unique subject identifier (from id_token).
+        email:          User's Google email address.
+        refresh_token:  OAuth2 refresh token for offline Calendar access.
+
+    Returns:
+        The app.users.id of the upserted user.
+
+    Raises:
+        RuntimeError: If the upsert does not return a row.
+    """
+    sql = """
+        INSERT INTO app.users (google_sub, email, google_refresh_token, created_at)
+        VALUES (%(google_sub)s, %(email)s, %(refresh_token)s, NOW())
+        ON CONFLICT (google_sub) DO UPDATE
+            SET google_refresh_token = EXCLUDED.google_refresh_token
+        RETURNING id
+    """
+    row: dict | None = _execute(
+        sql,
+        {"google_sub": google_sub, "email": email, "refresh_token": refresh_token},
+        fetch="one",
+        commit=True,
+    )
+    if row is None:
+        raise RuntimeError(f"upsert_user: no row returned for google_sub={google_sub!r}")
+    user_id: int = row["id"]
+    logger.info("upsert_user: user_id=%d email=%s", user_id, email)
+    return user_id
