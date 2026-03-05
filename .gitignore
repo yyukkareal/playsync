@@ -1,9 +1,18 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Secrets (Tuyệt đối không đẩy cái này)
 .env
 client_secrets.json
-venv/
-*.pyc
-__pycache__/
-*.sql
-*.xlsx
-.gitignore/
-playsync.egg-info/
+*.sql_backup
+playsync_backup.sql
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

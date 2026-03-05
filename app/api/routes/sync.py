@@ -1,9 +1,10 @@
 # app/api/routes/sync.py
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.dependencies import get_current_user
 from app.services.sync_service import run_sync
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,13 @@ class SyncResult(BaseModel):
         "Uses SHA-256 fingerprinting — unchanged events are skipped."
     ),
 )
-def sync_calendar(user_id: int) -> SyncResult:
-    """Trigger a timetable → Google Calendar sync for `user_id`."""
+def sync_calendar(
+    user_id: int,
+    current_user: int = Depends(get_current_user),
+) -> SyncResult:
+    if current_user != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only sync your own calendar.",
+        )
     return run_sync(user_id)

@@ -4,7 +4,8 @@ Google OAuth2 authentication router for PlaySync.
 
 Flow:
   1. GET /auth/google/login        → redirect user to Google consent screen
-  2. GET /auth/google/callback     → exchange code for tokens, upsert user, return user_id
+  2. GET /auth/google/callback     → exchange code for tokens, upsert user,
+                                     return signed JWT + user_id
 """
 import logging
 import os
@@ -14,6 +15,7 @@ import requests
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
+from app.api.dependencies import create_access_token
 from app.db.repository import upsert_user
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ def google_login() -> RedirectResponse:
         "response_type": "code",
         "scope":         SCOPES,
         "access_type":   "offline",
-        "prompt":        "consent",   # force refresh_token on every consent
+        "prompt":        "consent",
     }
     query_string = "&".join(f"{k}={requests.utils.quote(v)}" for k, v in params.items())
     url = f"{GOOGLE_AUTH_URL}?{query_string}"
@@ -70,8 +72,8 @@ def google_login() -> RedirectResponse:
     description=(
         "Receives the authorization `code` from Google, exchanges it for "
         "access + refresh tokens, decodes the `id_token` to extract the "
-        "user's identity, and upserts a row in `app.users`. "
-        "Returns `user_id` for use in subsequent API calls."
+        "user's identity, upserts a row in `app.users`, and returns a "
+        "signed JWT for use in subsequent API calls."
     ),
 )
 def google_callback(
@@ -95,21 +97,17 @@ def google_callback(
         raise HTTPException(status_code=400, detail="Token exchange with Google failed.")
 
     token_data: dict = token_resp.json()
-    access_token:  str       = token_data.get("access_token", "")
     refresh_token: str | None = token_data.get("refresh_token")
-    id_token_raw:  str       = token_data.get("id_token", "")
+    id_token_raw:  str        = token_data.get("id_token", "")
 
     if not refresh_token:
-        # Google only issues refresh_token on first consent or with prompt=consent.
-        # If missing here it means the user already granted access previously
-        # and the flow was called without prompt=consent.
-        logger.warning("google_callback: no refresh_token in response for this auth code.")
+        logger.warning("google_callback: no refresh_token in response.")
         raise HTTPException(
             status_code=400,
             detail="No refresh_token returned. Re-authorise via /auth/google/login.",
         )
 
-    # ── 2. Decode id_token (no signature verification — we just issued it) ──
+    # ── 2. Decode id_token ───────────────────────────────────────────────────
     try:
         claims: dict = jwt.decode(
             id_token_raw,
@@ -130,5 +128,13 @@ def google_callback(
         refresh_token=refresh_token,
     )
 
-    logger.info("google_callback: authenticated user_id=%d email=%s", user_id, email)
-    return {"user_id": user_id, "email": email}
+    # ── 4. Issue PlaySync JWT ────────────────────────────────────────────────
+    access_token: str = create_access_token(user_id)
+
+    logger.info("google_callback: issued JWT for user_id=%d email=%s", user_id, email)
+    return {
+        "access_token": access_token,
+        "token_type":   "bearer",
+        "user_id":      user_id,
+        "email":        email,
+    }
