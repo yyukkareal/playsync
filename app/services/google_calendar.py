@@ -1,278 +1,281 @@
 """
-app/services/google_calendar.py
-Google Calendar integration service for PlaySync.
+google_calendar.py — PlaySync Google Calendar API Adapter
 
-Receives plain event dictionaries from the repository layer and pushes
-them to Google Calendar as weekly recurring events.
+Responsibilities:
+  - Initialize the Google Calendar API client via OAuth env vars.
+  - Convert internal event dicts into Google Calendar event payloads.
+  - Create, update, and delete Google Calendar events.
 
-Sync is idempotent: the fingerprint of each timetable event is stored in
-the Google Calendar event's extendedProperties so that events already
-synced are never created twice.
-
-Required environment variables:
-    GOOGLE_CLIENT_ID
-    GOOGLE_CLIENT_SECRET
-    GOOGLE_REDIRECT_URI
-    GOOGLE_ACCESS_TOKEN      – OAuth access token for the authenticated user
-    GOOGLE_REFRESH_TOKEN     – OAuth refresh token
-    GOOGLE_CALENDAR_ID       – Target calendar (defaults to "primary")
+Non-goals:
+  - No sync logic, no deduplication, no DB access.
+  - Never queries Google Calendar to detect existing events.
+  - Idempotency is owned by sync_service.py + calendar_mappings table.
 """
 
 import os
-import sys
-from datetime import date, datetime, time
-from typing import Any
+import logging
+from datetime import date, time, datetime, timezone
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
+TIMEZONE = "Asia/Ho_Chi_Minh"
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
-
-# RFC 5545 weekday codes keyed by TMU numeric weekday (2 = Mon … 7 = Sat).
-# Cập nhật mapping để khớp với dữ liệu thực tế (1 = Mon, 2 = Tue, ...)
-_WEEKDAY_MAP: dict[str | int, str] = {
-    1: "MO", "1": "MO",
-    2: "TU", "2": "TU",
-    3: "WE", "3": "WE",
-    4: "TH", "4": "TH",
-    5: "FR", "5": "FR",
-    6: "SA", "6": "SA",
-    7: "SU", "7": "SU",
-}
-
-# Namespace key used in Google Calendar extendedProperties to store the
-# timetable fingerprint so we can detect already-synced events.
-_FINGERPRINT_KEY = "playsync_fingerprint"
 
 
 # ---------------------------------------------------------------------------
-# Service class
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _require_env(name: str) -> str:
+    """Return an environment variable or raise if absent."""
+    value = os.getenv(name)
+    if not value:
+        raise EnvironmentError(
+            f"Required environment variable '{name}' is not set."
+        )
+    return value
+
+
+def _require_field(event: dict, field: str):
+    """Return a field from the event dict or raise if missing/None."""
+    value = event.get(field)
+    if value is None:
+        raise ValueError(f"Event is missing required field: '{field}'")
+    return value
+
+
+def _format_datetime(d: date, t: time) -> str:
+    """Combine a date and time into an RFC3339-style local datetime string."""
+    dt = datetime.combine(d, t)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _format_rrule_until(end_date: date) -> str:
+    """Format end_date as YYYYMMDD for use in RRULE UNTIL."""
+    return end_date.strftime("%Y%m%dT235959Z")
+
+
+def _build_description(course_code: str | None, instructor: str | None) -> str:
+    parts = []
+    if course_code:
+        parts.append(f"Course code: {course_code}")
+    if instructor:
+        parts.append(f"Instructor:  {instructor}")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# GoogleCalendarService
 # ---------------------------------------------------------------------------
 
 class GoogleCalendarService:
-    """Synchronize TMU timetable events with Google Calendar."""
+    """
+    Thin adapter around the Google Calendar API.
 
-    # ------------------------------------------------------------------
-    # Initialisation
-    # ------------------------------------------------------------------
+    All methods accept/return plain dicts; no ORM models or DB calls here.
+    """
 
     def __init__(self) -> None:
-        """
-        Build the Google Calendar API client from OAuth 2.0 credentials
-        sourced entirely from environment variables.
-        """
+        self._calendar_id = _require_env("GOOGLE_CALENDAR_ID")
+        self._service = self._build_service()
+
+    # ------------------------------------------------------------------
+    # Client initialisation
+    # ------------------------------------------------------------------
+
+    def _build_service(self):
+        """Build and return an authenticated Google Calendar API client."""
         creds = Credentials(
-            token=os.environ["GOOGLE_ACCESS_TOKEN"],
-            refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+            token=_require_env("GOOGLE_ACCESS_TOKEN"),
+            refresh_token=_require_env("GOOGLE_REFRESH_TOKEN"),
+            client_id=_require_env("GOOGLE_CLIENT_ID"),
+            client_secret=_require_env("GOOGLE_CLIENT_SECRET"),
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.environ["GOOGLE_CLIENT_ID"],
-            client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
             scopes=SCOPES,
         )
-        self._service = build("calendar", "v3", credentials=creds)
-        self._calendar_id = os.environ.get("GOOGLE_CALENDAR_ID", "primary")
+        return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def build_event_body(
-        self,
-        event: dict[str, Any],
-        timezone: str = DEFAULT_TIMEZONE,
-    ) -> dict[str, Any]:
+    def build_event_body(self, event: dict) -> dict:
         """
-        Convert a timetable event dictionary into a Google Calendar
-        event payload.
+        Convert an internal event dict into a Google Calendar event payload.
 
-        - start/end datetimes are anchored on *start_date* (first occurrence)
-        - The RRULE repeats weekly on the correct weekday until *end_date*
-        - The event fingerprint is stored in extendedProperties so that
-          subsequent sync runs can detect and skip this event
+        The event is created as a weekly recurring event that repeats until
+        event['end_date']. The fingerprint is stored in extendedProperties
+        so sync_service.py can detect stale mappings without querying GCal.
+
+        Args:
+            event: Internal event dict matching the events DB schema.
+
+        Returns:
+            A dict ready to be passed to the Google Calendar API.
+
+        Raises:
+            ValueError: If any required field is missing.
         """
-        rfc_day = _WEEKDAY_MAP.get(event["weekday"])
-        if rfc_day is None:
+        # --- required fields ---
+        course_name: str  = _require_field(event, "course_name")
+        course_code: str  = _require_field(event, "course_code")
+        instructor: str | None = event.get("instructor")
+        room: str         = _require_field(event, "room")
+        start_date: date  = _require_field(event, "start_date")
+        end_date: date    = _require_field(event, "end_date")
+        start_time: time  = _require_field(event, "start_time")
+        end_time: time    = _require_field(event, "end_time")
+        fingerprint: str  = _require_field(event, "fingerprint")
+
+        if end_date < start_date:
             raise ValueError(
-                f"Unknown weekday '{event['weekday']}'. "
-                f"Expected one of {sorted(set(_WEEKDAY_MAP.values()))}."
+                f"end_date ({end_date}) must not be before start_date ({start_date})."
             )
 
-        start_date = _to_date(event["start_date"])
-        end_date   = _to_date(event["end_date"])
-        start_time = _to_time(event["start_time"])
-        end_time   = _to_time(event["end_time"])
-
-        start_dt = datetime.combine(start_date, start_time)
-        end_dt   = datetime.combine(start_date, end_time)
-        until    = end_date.strftime("%Y%m%d")
-
-        description_parts = []
-        if event.get("course_code"):
-            description_parts.append(f"Course code: {event['course_code']}")
-        if event.get("instructor"):
-            description_parts.append(f"Instructor: {event['instructor']}")
+        start_dt = _format_datetime(start_date, start_time)
+        end_dt   = _format_datetime(start_date, end_time)   # same day; RRULE handles recurrence
+        until    = _format_rrule_until(end_date)
 
         return {
-            "summary": event.get("course_name", ""),
-            "location": event.get("room", ""),
-            "description": "\n".join(description_parts),
+            "summary": course_name,
+            "location": room,
+            "description": _build_description(course_code, instructor),
             "start": {
-                "dateTime": start_dt.isoformat(),
-                "timeZone": timezone,
+                "dateTime": start_dt,
+                "timeZone": TIMEZONE,
             },
             "end": {
-                "dateTime": end_dt.isoformat(),
-                "timeZone": timezone,
+                "dateTime": end_dt,
+                "timeZone": TIMEZONE,
             },
             "recurrence": [
-                f"RRULE:FREQ=WEEKLY;BYDAY={rfc_day};UNTIL={until}"
+                f"RRULE:FREQ=WEEKLY;UNTIL={until}",
             ],
             "extendedProperties": {
                 "private": {
-                    _FINGERPRINT_KEY: event.get("fingerprint", ""),
-                }
+                    "playsync_fingerprint": fingerprint,
+                },
             },
         }
 
-    def create_recurring_event(
-        self,
-        event: dict[str, Any],
-        timezone: str = DEFAULT_TIMEZONE,
-    ) -> dict[str, Any]:
+    def create_event(self, event: dict) -> dict:
         """
-        Insert a single recurring event into Google Calendar.
+        Create a new Google Calendar event from an internal event dict.
 
-        Returns the created event resource dictionary.
+        Args:
+            event: Internal event dict.
+
+        Returns:
+            The created Google Calendar event resource (dict).
+
+        Raises:
+            ValueError: If required fields are missing.
+            googleapiclient.errors.HttpError: On API failure.
         """
-        body = self.build_event_body(event, timezone=timezone)
-        return (
-            self._service.events()
-            .insert(calendarId=self._calendar_id, body=body)
-            .execute()
+        body = self.build_event_body(event)
+        try:
+            created = (
+                self._service.events()
+                .insert(calendarId=self._calendar_id, body=body)
+                .execute()
+            )
+        except HttpError as exc:
+            logger.error(
+                "Failed to create GCal event for course '%s': %s",
+                event.get("course_code"), exc,
+            )
+            raise
+
+        logger.info(
+            "Created GCal event '%s' (id=%s) for course %s",
+            created.get("summary"),
+            created.get("id"),
+            event.get("course_code"),
         )
+        return created
 
-    def sync_events(
-        self,
-        events: list[dict[str, Any]],
-        timezone: str = DEFAULT_TIMEZONE,
-    ) -> int:
+    def update_event(self, google_event_id: str, event: dict) -> dict:
         """
-        Synchronize a list of timetable events to Google Calendar.
+        Update an existing Google Calendar event.
 
-        Idempotency strategy:
-        1. Fetch all fingerprints already stored in this calendar.
-        2. Deduplicate the incoming list by fingerprint (one event per
-           unique slot — identical rows from the Excel file are collapsed).
-        3. Skip any event whose fingerprint already exists in the calendar.
-        4. Create recurring events only for new fingerprints.
+        Uses a full PUT (events.update) rather than a PATCH so that stale
+        fields from a previous sync round are always overwritten cleanly.
 
-        Returns the number of events newly created in this run.
+        Args:
+            google_event_id: The GCal event ID stored in calendar_mappings.
+            event: Updated internal event dict.
+
+        Returns:
+            The updated Google Calendar event resource (dict).
+
+        Raises:
+            ValueError: If required fields are missing.
+            googleapiclient.errors.HttpError: On API failure.
         """
-        if not events:
-            return 0
+        if not google_event_id:
+            raise ValueError("google_event_id must not be empty.")
 
-        existing_fingerprints = self._fetch_existing_fingerprints()
-
-        # Deduplicate incoming events by fingerprint.
-        unique_events: dict[str, dict[str, Any]] = {}
-        for event in events:
-            fp = event.get("fingerprint", "")
-            if fp:
-                unique_events[fp] = event
-
-        synced = 0
-        for fingerprint, event in unique_events.items():
-            if fingerprint in existing_fingerprints:
-                continue  # already synced in a previous run
-
-            try:
-                self.create_recurring_event(event, timezone=timezone)
-                synced += 1
-            except HttpError as exc:
-                _warn(f"Google API error for fingerprint {fingerprint}: {exc}")
-            except (KeyError, ValueError) as exc:
-                _warn(f"Skipping malformed event {fingerprint}: {exc}")
-
-        return synced
-
-    # Alias used by the /sync endpoint in main.py
-    def create_events(self, events: list[dict[str, Any]]) -> int:
-        return self.sync_events(events)
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _fetch_existing_fingerprints(self) -> set[str]:
-        """
-        Retrieve every PlaySync fingerprint already stored in the target
-        calendar by querying extendedProperties with pagination.
-        """
-        fingerprints: set[str] = set()
-        page_token: str | None = None
-        filter_str = f"{_FINGERPRINT_KEY}="
-
-        while True:
-            try:
-                response = (
-                    self._service.events()
-                    .list(
-                        calendarId=self._calendar_id,
-                        privateExtendedProperty=filter_str,
-                        fields=(
-                            "nextPageToken,"
-                            "items(extendedProperties/private)"
-                        ),
-                        pageToken=page_token,
-                        maxResults=2500,
-                    )
-                    .execute()
+        body = self.build_event_body(event)
+        try:
+            updated = (
+                self._service.events()
+                .update(
+                    calendarId=self._calendar_id,
+                    eventId=google_event_id,
+                    body=body,
                 )
-            except HttpError as exc:
-                _warn(f"Could not fetch existing fingerprints: {exc}")
-                break
+                .execute()
+            )
+        except HttpError as exc:
+            logger.error(
+                "Failed to update GCal event '%s' for course '%s': %s",
+                google_event_id, event.get("course_code"), exc,
+            )
+            raise
 
-            for item in response.get("items", []):
-                fp = (
-                    item.get("extendedProperties", {})
-                    .get("private", {})
-                    .get(_FINGERPRINT_KEY, "")
+        logger.info(
+            "Updated GCal event '%s' (id=%s) for course %s",
+            updated.get("summary"),
+            updated.get("id"),
+            event.get("course_code"),
+        )
+        return updated
+
+    def delete_event(self, google_event_id: str) -> None:
+        """
+        Delete a Google Calendar event by its GCal event ID.
+
+        Silently ignores 410 Gone responses — the event was already deleted.
+
+        Args:
+            google_event_id: The GCal event ID stored in calendar_mappings.
+
+        Raises:
+            ValueError: If google_event_id is empty.
+            googleapiclient.errors.HttpError: On unexpected API failure.
+        """
+        if not google_event_id:
+            raise ValueError("google_event_id must not be empty.")
+
+        try:
+            (
+                self._service.events()
+                .delete(calendarId=self._calendar_id, eventId=google_event_id)
+                .execute()
+            )
+            logger.info("Deleted GCal event id=%s", google_event_id)
+        except HttpError as exc:
+            if exc.resp.status == 410:
+                # Already gone — treat as success so mappings can be cleaned up.
+                logger.warning(
+                    "GCal event '%s' was already deleted (410 Gone).", google_event_id
                 )
-                if fp:
-                    fingerprints.add(fp)
-
-            page_token = response.get("nextPageToken")
-            if not page_token:
-                break
-
-        return fingerprints
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
-def _to_date(value) -> date:
-    """Coerce an ISO string or date/datetime object to a plain date."""
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    return date.fromisoformat(str(value))
-
-
-def _to_time(value) -> time:
-    """Coerce an HH:MM or HH:MM:SS string (or time object) to time."""
-    if isinstance(value, time):
-        return value
-    return time.fromisoformat(str(value))
-
-
-def _warn(message: str) -> None:
-    print(f"[PlaySync WARNING] {message}", file=sys.stderr)
+            else:
+                logger.error(
+                    "Failed to delete GCal event '%s': %s", google_event_id, exc
+                )
+                raise

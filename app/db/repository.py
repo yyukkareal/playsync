@@ -1,130 +1,226 @@
 """
-app/db/repository.py
-Database access layer for PlaySync timetable events.
-All database interaction is isolated here — the API layer must not execute raw SQL.
+repository.py — PlaySync Database Repository Layer
+
+Responsibilities:
+  - Execute parameterized SQL queries against PostgreSQL.
+  - Return plain dicts to the service layer (no ORM objects).
+  - No business logic; no Google API awareness.
+
+Connection management:
+  Assumes a module-level `get_connection()` helper exported from
+  app.db.connection. Each function acquires a connection, executes its
+  query, and releases the connection back to the pool.
 """
 
-import os
+import logging
 from typing import Any
 
-import sqlalchemy as sa
-from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+import psycopg
+from psycopg.rows import dict_row
 
-from app.db.models import Event
+from app.db.connection import get_connection
 
-
-# ---------------------------------------------------------------------------
-# Engine
-# ---------------------------------------------------------------------------
-
-def get_engine() -> Engine:
-    """Create and return a SQLAlchemy engine using the DATABASE_URL env var."""
-    database_url = os.environ["DATABASE_URL"]
-    return create_engine(database_url, pool_pre_ping=True)
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Read
+# Internal helpers
 # ---------------------------------------------------------------------------
 
-def get_events(
-    engine: Engine,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict[str, Any]]:
+def _execute(
+    sql: str,
+    params: dict[str, Any] | None = None,
+    *,
+    fetch: str = "none",   # "none" | "one" | "all"
+    commit: bool = False,
+) -> Any:
     """
-    Return timetable events from the database.
+    Execute a parameterised query and return results as dict(s).
 
-    Rows are ordered by id; pagination is controlled by *limit* and *offset*.
-    Returns a list of JSON-serialisable dictionaries.
+    Args:
+        sql:    Parameterised SQL string (%(name)s style).
+        params: Mapping of parameter names to values.
+        fetch:  "none"  → return None
+                "one"   → return a single dict or None
+                "all"   → return a list of dicts
+        commit: If True, commit after execution (for writes).
+
+    Returns:
+        None | dict | list[dict] depending on *fetch*.
     """
-    with Session(engine) as session:
-        rows = (
-            session.query(Event)
-            .order_by(Event.id)
-            .limit(limit)
-            .offset(offset)
-            .all()
-        )
-        return [_event_to_dict(row) for row in rows]
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
 
+            if commit:
+                conn.commit()
 
-def count_events(engine: Engine) -> int:
-    """Return the total number of events stored in the database."""
-    with Session(engine) as session:
-        return session.query(sa.func.count(Event.id)).scalar()
+            if fetch == "one":
+                row = cur.fetchone()
+                return dict(row) if row else None
+            if fetch == "all":
+                return [dict(row) for row in cur.fetchall()]
+            return None
 
 
 # ---------------------------------------------------------------------------
-# Write
+# Events + calendar_mappings
 # ---------------------------------------------------------------------------
 
-def upsert_events(engine: Engine, events: list) -> int:
+def get_events_with_mapping(user_id: int) -> list[dict]:
     """
-    Insert AcademicEvent objects parsed from the Excel timetable into
-    app.events.
+    Return all events LEFT-JOINed with calendar_mappings for *user_id*.
 
-    Uses ON CONFLICT (fingerprint) DO NOTHING so that re-running the
-    importer is fully idempotent — duplicate rows are silently skipped.
+    Rows with no mapping yet will have google_event_id=None and
+    last_synced_at=None — the service layer treats these as "needs create".
 
-    Returns the number of rows actually inserted.
+    Args:
+        user_id: The user whose calendar is being synced.
+
+    Returns:
+        List of event dicts, each containing every events column plus
+        google_event_id and last_synced_at from calendar_mappings.
     """
-    if not events:
-        return 0
+    sql = """
+        SELECT
+            e.*,
+            m.google_event_id,
+            m.last_synced_at
+        FROM app.events e
+        LEFT JOIN app.calendar_mappings m
+            ON  e.id      = m.event_id
+            AND m.user_id = %(user_id)s
+    """
+    rows: list[dict] = _execute(sql, {"user_id": user_id}, fetch="all")
+    logger.debug(
+        "get_events_with_mapping: fetched %d event(s) for user %d.",
+        len(rows), user_id,
+    )
+    return rows
 
-    rows = [_academic_event_to_row(e) for e in events]
 
-    stmt = (
-        pg_insert(Event.__table__)
-        .values(rows)
-        .on_conflict_do_nothing(index_elements=["fingerprint"])
+def insert_calendar_mapping(
+    user_id: int,
+    event_id: int,
+    google_event_id: str,
+) -> None:
+    """
+    Persist a new calendar_mappings row after a GCal event is created.
+
+    Args:
+        user_id:         Owner of the mapping.
+        event_id:        FK to app.events.id.
+        google_event_id: Opaque GCal event ID returned by the API.
+    """
+    sql = """
+        INSERT INTO app.calendar_mappings
+            (user_id, event_id, google_event_id, created_at)
+        VALUES
+            (%(user_id)s, %(event_id)s, %(google_event_id)s, NOW())
+    """
+    _execute(
+        sql,
+        {"user_id": user_id, "event_id": event_id, "google_event_id": google_event_id},
+        commit=True,
+    )
+    logger.debug(
+        "insert_calendar_mapping: user=%d event=%d gcal=%s",
+        user_id, event_id, google_event_id,
     )
 
-    with engine.begin() as conn:
-        result = conn.execute(stmt)
-        return result.rowcount
+
+def update_calendar_mapping_sync_time(user_id: int, event_id: int) -> None:
+    """
+    Stamp last_synced_at = NOW() after a GCal event is successfully updated.
+
+    Args:
+        user_id:  Owner of the mapping.
+        event_id: FK to app.events.id.
+    """
+    sql = """
+        UPDATE app.calendar_mappings
+        SET    last_synced_at = NOW()
+        WHERE  user_id  = %(user_id)s
+          AND  event_id = %(event_id)s
+    """
+    _execute(sql, {"user_id": user_id, "event_id": event_id}, commit=True)
+    logger.debug(
+        "update_calendar_mapping_sync_time: user=%d event=%d",
+        user_id, event_id,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Private helpers
+# sync_runs audit log
 # ---------------------------------------------------------------------------
 
-def _event_to_dict(event: Event) -> dict[str, Any]:
-    """Serialise an Event ORM instance to a plain dictionary."""
-    return {
-        "id":          event.id,
-        "course_code": event.course_code,
-        "course_name": event.course_name,
-        "weekday":     event.weekday,
-        "start_time":  str(event.start_time) if event.start_time else None,
-        "end_time":    str(event.end_time)   if event.end_time   else None,
-        "room":        event.room,
-        "start_date":  event.start_date.isoformat() if event.start_date else None,
-        "end_date":    event.end_date.isoformat()   if event.end_date   else None,
-        "fingerprint": event.fingerprint,
-        "instructor":  event.instructor,
-        "duration":    event.duration,
-    }
+def create_sync_run(user_id: int) -> int:
+    """
+    Open a new sync_runs audit record with status='PENDING'.
+
+    Args:
+        user_id: The user for whom the sync is being started.
+
+    Returns:
+        The auto-generated run_id (sync_runs.id).
+
+    Raises:
+        RuntimeError: If the INSERT does not return a row (should never happen).
+    """
+    sql = """
+        INSERT INTO app.sync_runs (user_id, status, started_at)
+        VALUES (%(user_id)s, 'PENDING', NOW())
+        RETURNING id
+    """
+    row: dict | None = _execute(sql, {"user_id": user_id}, fetch="one", commit=True)
+    if row is None:
+        raise RuntimeError(
+            f"create_sync_run: INSERT did not return a run_id for user {user_id}."
+        )
+    run_id: int = row["id"]
+    logger.debug("create_sync_run: opened run_id=%d for user=%d.", run_id, user_id)
+    return run_id
 
 
-def _academic_event_to_row(event) -> dict[str, Any]:
+def finish_sync_run(
+    run_id: int,
+    status: str,
+    created: int,
+    updated: int,
+    skipped: int,
+) -> None:
     """
-    Convert an AcademicEvent (parser domain object) into a flat dictionary
-    whose keys match exactly the columns in app.events.
+    Close a sync_runs record with final counts and a terminal status.
+
+    Args:
+        run_id:  The sync_runs.id returned by create_sync_run.
+        status:  Terminal status string — 'SUCCESS' or 'FAILED'.
+        created: Number of GCal events created during this run.
+        updated: Number of GCal events updated during this run.
+        skipped: Number of events skipped (no change detected).
     """
-    return {
-        "course_code": event.course_code,
-        "course_name": event.course_name,
-        "weekday":     event.weekday,
-        "start_time":  event.start_time,
-        "end_time":    event.end_time,
-        "room":        event.room,
-        "start_date":  event.start_date,
-        "end_date":    event.end_date,
-        "fingerprint": event.fingerprint,
-        "instructor":  getattr(event, "instructor", None),
-        "duration":    getattr(event, "duration",   None),
-    }
+    sql = """
+        UPDATE app.sync_runs
+        SET
+            status         = %(status)s,
+            created_events = %(created)s,
+            updated_events = %(updated)s,
+            skipped_events = %(skipped)s,
+            finished_at    = NOW()
+        WHERE id = %(run_id)s
+    """
+    _execute(
+        sql,
+        {
+            "run_id":  run_id,
+            "status":  status,
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+        },
+        commit=True,
+    )
+    logger.debug(
+        "finish_sync_run: run_id=%d status=%s (created=%d updated=%d skipped=%d).",
+        run_id, status, created, updated, skipped,
+    )
