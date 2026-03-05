@@ -72,15 +72,13 @@ def _handle_create(
     user_id: int,
     event: dict,
 ) -> None:
-    """Create a GCal event and persist the mapping to the DB."""
     created = gcal.create_event(event)
     google_event_id: str = created["id"]
-    repository.insert_calendar_mapping(user_id, event["id"], google_event_id)
-    logger.debug(
-        "Created GCal event '%s' (google_event_id=%s) for user %d.",
-        event.get("course_name"), google_event_id, user_id,
-    )
 
+    repository.insert_calendar_mapping(user_id, event["id"], google_event_id)
+
+    # 👇 thêm dòng này
+    repository.update_calendar_mapping_sync_time(user_id, event["id"])
 
 def _handle_update(
     gcal: GoogleCalendarService,
@@ -101,7 +99,7 @@ def _handle_update(
 # Public API
 # ---------------------------------------------------------------------------
 
-def run_sync(user_id: int) -> SyncSummary:
+def run_sync(user_id: int, gcal=None):
     """
     Synchronise timetable events for *user_id* to Google Calendar.
 
@@ -132,7 +130,8 @@ def run_sync(user_id: int) -> SyncSummary:
     wall_start = time.monotonic()
 
     try:
-        gcal = GoogleCalendarService()
+        if gcal is None:
+            gcal = GoogleCalendarService()
         events: list[dict] = repository.get_events_with_mapping(user_id)
 
         for event in events:

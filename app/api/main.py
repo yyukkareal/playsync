@@ -1,117 +1,120 @@
-"""
-app/api/main.py
-FastAPI entrypoint for PlaySync.
-
-All database access is delegated to app.db.repository.
-All parsing is delegated to app.parser.tmu_parser.
-All calendar sync is delegated to app.services.google_calendar.
-"""
+# app/api/main.py
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
+from typing import Any
 
-from app.db.repository import count_events, get_engine, get_events, upsert_events
-from app.parser.tmu_parser import parse_events
-from app.services.google_calendar import GoogleCalendarService
-
-# ---------------------------------------------------------------------------
-# Application
-# ---------------------------------------------------------------------------
+from app.services.sync_service import run_sync
+from app.db import repository
 
 app = FastAPI(
     title="PlaySync API",
-    description="Sync TMU timetable to Google Calendar",
-    version="1.0.0",
+    description="Minimal FastAPI entrypoint for the PlaySync backend.",
+    version="1.0.0"
 )
 
-# A single engine is created once at startup and reused across requests.
-_engine = get_engine()
 
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.get("/", tags=["meta"], summary="Service info")
-def root() -> dict:
-    """Return basic service information."""
-    return {"service": "PlaySync", "status": "running"}
-
-
-@app.get("/health", tags=["meta"], summary="Health check")
-def health() -> dict:
-    """Lightweight liveness probe — returns 200 when the service is up."""
-    return {"status": "ok"}
-
-
-@app.get("/events", tags=["timetable"], summary="List timetable events")
-def list_events(
-    limit: int = Query(default=100, ge=1, le=1000, description="Maximum rows to return"),
-    offset: int = Query(default=0, ge=0, description="Number of rows to skip"),
-) -> list[dict]:
+class SyncResponse(BaseModel):
     """
-    Return timetable events stored in the database.
-
-    Supports pagination via **limit** and **offset**.
+    Pydantic model representing the result of a synchronization run.
     """
-    return get_events(_engine, limit=limit, offset=offset)
+    created_events: int
+    updated_events: int
+    skipped_events: int
 
 
-@app.get("/stats", tags=["timetable"], summary="Database statistics")
-def stats() -> dict:
-    """Return aggregate statistics about the stored timetable data."""
-    total = count_events(_engine)
-    return {"events": total}
-
-
-@app.post("/ingest", tags=["timetable"], summary="Ingest timetable from Excel")
-def ingest() -> dict:
+@app.get("/", response_model=dict[str, str])
+async def root() -> dict[str, str]:
     """
-    Parse **timetable.xlsx** and upsert events into the database.
+    Return basic service information.
 
-    - Duplicate events (matched by fingerprint) are silently skipped.
-    - Returns the number of events parsed and the number actually inserted.
+    Returns:
+        dict[str, str]: Service name and its current status.
+    """
+    return {
+        "service": "PlaySync",
+        "status": "running"
+    }
+
+
+@app.get("/health", response_model=dict[str, str])
+async def health_check() -> dict[str, str]:
+    """
+    Health check endpoint used by uptime monitors.
+
+    Returns:
+        dict[str, str]: A simple dictionary confirming the API is operational.
+    """
+    return {
+        "status": "ok"
+    }
+
+
+@app.get("/events", response_model=list[dict[str, Any]])
+async def get_events(
+    limit: int = Query(100, description="Maximum rows returned"),
+    offset: int = Query(0, description="Pagination offset")
+) -> list[dict[str, Any]]:
+    """
+    Return timetable events stored in PostgreSQL.
+
+    Args:
+        limit (int): Maximum number of records to return. Defaults to 100.
+        offset (int): Number of records to skip for pagination. Defaults to 0.
+
+    Returns:
+        list[dict[str, Any]]: A list of event records from the database.
+
+    Raises:
+        HTTPException: If the database repository fails to fetch events.
     """
     try:
-        events = parse_events("timetable.xlsx")
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Parse error: {exc}") from exc
-
-    try:
-        inserted = upsert_events(_engine, events)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Database error: {exc}") from exc
-
-    return {"parsed": len(events), "inserted": inserted}
+        events = repository.get_events(limit=limit, offset=offset)
+        return events
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch events: {str(e)}")
 
 
-@app.post("/sync", tags=["calendar"], summary="Sync events to Google Calendar")
-def sync(
-    limit: int = Query(
-        default=1000,
-        ge=1,
-        le=5000,
-        description="Maximum number of events to sync in one call",
-    ),
-) -> dict:
+@app.get("/stats", response_model=dict[str, int])
+async def get_stats() -> dict[str, int]:
     """
-    Push timetable events from the database to Google Calendar.
+    Return high-level database statistics.
 
-    Events are fetched in a single batch (controlled by **limit**) and
-    created via the GoogleCalendarService. Existing calendar events are
-    not de-duplicated here — that responsibility belongs to the service layer.
+    Returns:
+        dict[str, int]: Aggregated statistics such as total events and mappings.
+
+    Raises:
+        HTTPException: If the database repository fails to fetch statistics.
     """
-    events = get_events(_engine, limit=limit, offset=0)
-
-    if not events:
-        return {"synced_events": 0}
-
     try:
-        service = GoogleCalendarService()
-        synced = service.create_events(events)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Calendar sync error: {exc}") from exc
+        # Assuming repository functions based on the implementation description
+        events_count = repository.count_events()
+        mappings_count = repository.count_mappings()
+        return {
+            "total_events": events_count,
+            "total_mappings": mappings_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {str(e)}")
 
-    return {"synced_events": synced}
+
+@app.post("/sync/{user_id}", response_model=SyncResponse)
+async def trigger_sync(user_id: str) -> SyncResponse:
+    """
+    Trigger timetable synchronization for a specific user.
+
+    Args:
+        user_id (str): The unique identifier of the user to sync.
+
+    Returns:
+        SyncResponse: A summary of the synchronization outcome (created, updated, and skipped events).
+
+    Raises:
+        HTTPException: If the synchronization process fails.
+    """
+    try:
+        result = run_sync(user_id)
+        # Ensuring the service returns a dict compatible with the Pydantic model
+        return SyncResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync failed for user {user_id}: {str(e)}")
