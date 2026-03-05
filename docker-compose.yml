@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: playsync_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-tmu_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-909090}
+      POSTGRES_DB: ${DB_NAME:-tmu_timetable_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-tmu_admin} -d ${DB_NAME:-tmu_timetable_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: playsync_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-tmu_admin}:${DB_PASSWORD:-909090}@db:5432/${DB_NAME:-tmu_timetable_db}
+
+volumes:
+  postgres_data:

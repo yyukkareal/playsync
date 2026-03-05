@@ -21,8 +21,8 @@ class EventOut(BaseModel):
     room: str
     start_date: date
     end_date: date
-    instructor: str
-    duration: int
+    instructor: str | None = None
+    duration: int | None = None
     fingerprint: str
 
 

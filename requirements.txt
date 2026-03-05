@@ -1,1 +1,12 @@
-pip install fastapi uvicorn sqlalchemy psycopg2-binary pandas openpyxl python-dotenv google-api-python-client google-auth-oauthlib google-auth-httplib2
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+pandas
+openpyxl
+python-dotenv
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+pyjwt
+requests
