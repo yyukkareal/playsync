@@ -224,3 +224,108 @@ def finish_sync_run(
         "finish_sync_run: run_id=%d status=%s (created=%d updated=%d skipped=%d).",
         run_id, status, created, updated, skipped,
     )
+
+# ---------------------------------------------------------------------------
+# Events queries
+# ---------------------------------------------------------------------------
+
+def get_all_events(course_code: str | None = None) -> list[dict]:
+    """
+    Return events from app.events, optionally filtered by course_code.
+
+    Args:
+        course_code: If provided, only return events matching this code (case-insensitive).
+
+    Returns:
+        List of event dicts.
+    """
+    if course_code:
+        sql = "SELECT * FROM app.events WHERE LOWER(course_code) = LOWER(%(course_code)s) ORDER BY start_date, weekday, start_time"
+        rows = _execute(sql, {"course_code": course_code}, fetch="all")
+    else:
+        sql = "SELECT * FROM app.events ORDER BY start_date, weekday, start_time"
+        rows = _execute(sql, fetch="all")
+    logger.debug("get_all_events: returned %d row(s).", len(rows))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# User course selection
+# ---------------------------------------------------------------------------
+
+def get_user_courses(user_id: int) -> list[dict]:
+    """
+    Return the list of course_codes selected by user_id.
+
+    Args:
+        user_id: Target user.
+
+    Returns:
+        List of dicts with keys: id, user_id, course_code, created_at.
+    """
+    sql = """
+        SELECT id, user_id, course_code, created_at
+        FROM app.user_courses
+        WHERE user_id = %(user_id)s
+        ORDER BY course_code
+    """
+    rows = _execute(sql, {"user_id": user_id}, fetch="all")
+    logger.debug("get_user_courses: user=%d has %d course(s).", user_id, len(rows))
+    return rows
+
+
+def set_user_courses(user_id: int, course_codes: list[str]) -> None:
+    """
+    Replace the full course selection for user_id (delete-then-insert).
+
+    Args:
+        user_id:      Target user.
+        course_codes: New set of course codes. Pass [] to clear all.
+    """
+    delete_sql = "DELETE FROM app.user_courses WHERE user_id = %(user_id)s"
+    _execute(delete_sql, {"user_id": user_id}, commit=True)
+
+    if course_codes:
+        insert_sql = """
+            INSERT INTO app.user_courses (user_id, course_code, created_at)
+            VALUES (%(user_id)s, %(course_code)s, NOW())
+            ON CONFLICT (user_id, course_code) DO NOTHING
+        """
+        for code in course_codes:
+            _execute(insert_sql, {"user_id": user_id, "course_code": code}, commit=True)
+
+    logger.info("set_user_courses: user=%d → %d course(s) saved.", user_id, len(course_codes))
+
+
+def get_events_with_mapping_filtered(user_id: int) -> list[dict]:
+    """
+    Like get_events_with_mapping but scoped to user's selected courses.
+
+    If the user has no courses saved, falls back to all events
+    (same behaviour as original get_events_with_mapping).
+
+    Args:
+        user_id: The user whose calendar is being synced.
+
+    Returns:
+        List of event dicts joined with calendar_mappings for user_id.
+    """
+    sql = """
+        SELECT
+            e.*,
+            m.google_event_id,
+            m.last_synced_at
+        FROM app.events e
+        JOIN app.user_courses uc
+            ON  LOWER(e.course_code) = LOWER(uc.course_code)
+            AND uc.user_id = %(user_id)s
+        LEFT JOIN app.calendar_mappings m
+            ON  e.id      = m.event_id
+            AND m.user_id = %(user_id)s
+    """
+    rows = _execute(sql, {"user_id": user_id}, fetch="all")
+    logger.debug(
+        "get_events_with_mapping_filtered: fetched %d event(s) for user %d.",
+        len(rows), user_id,
+    )
+    return rows

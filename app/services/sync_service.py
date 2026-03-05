@@ -103,10 +103,13 @@ def run_sync(user_id: int, gcal=None):
     """
     Synchronise timetable events for *user_id* to Google Calendar.
 
+    Only syncs courses the user has selected via app.user_courses.
+    If no courses are selected, falls back to all events.
+
     Algorithm
     ---------
     1. Open a sync_runs audit record (status=PENDING).
-    2. Fetch every event row together with its calendar_mapping status.
+    2. Fetch events filtered by user's course selection (+ calendar_mapping status).
     3. For each event:
        a. No google_event_id  → create in GCal, insert mapping row.
        b. google_event_id exists but event is stale → update in GCal.
@@ -132,7 +135,7 @@ def run_sync(user_id: int, gcal=None):
     try:
         if gcal is None:
             gcal = GoogleCalendarService()
-        events: list[dict] = repository.get_events_with_mapping(user_id)
+        events: list[dict] = repository.get_events_with_mapping_filtered(user_id)
 
         for event in events:
             google_event_id: str | None = event.get("google_event_id")

@@ -1,7 +1,12 @@
+# app/api/routes/sync.py
+import logging
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+
 from app.services.sync_service import run_sync
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["sync"])
 
 
@@ -16,12 +21,11 @@ class SyncResult(BaseModel):
     response_model=SyncResult,
     summary="Sync timetable to Google Calendar",
     description=(
-        "Parses the TMU timetable Excel file and synchronizes events "
-        "to the Google Calendar of the specified user. "
-        "Uses SHA-256 fingerprinting for idempotent sync — "
-        "unchanged events are skipped, new ones created, modified ones updated."
+        "Syncs only the courses selected via `POST /api/users/{user_id}/courses`. "
+        "If no courses are selected, falls back to syncing all events. "
+        "Uses SHA-256 fingerprinting — unchanged events are skipped."
     ),
 )
 def sync_calendar(user_id: int) -> SyncResult:
-    """Trigger a full timetable → Google Calendar sync for `user_id`."""
+    """Trigger a timetable → Google Calendar sync for `user_id`."""
     return run_sync(user_id)

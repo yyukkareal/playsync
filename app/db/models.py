@@ -1,7 +1,7 @@
 # app/db/models.py
-from datetime import date, time
+from datetime import date, time, datetime
 
-from sqlalchemy import Integer, Text, Date, Time
+from sqlalchemy import Integer, Text, Date, Time, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -26,3 +26,12 @@ class Event(Base):
     fingerprint: Mapped[str] = mapped_column(Text, unique=True)
     instructor: Mapped[str] = mapped_column(Text)
     duration: Mapped[int] = mapped_column(Integer)
+
+class UserCourse(Base):
+    __tablename__ = 'user_courses'
+    __table_args__ = {'schema': 'app'}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer)
+    course_code: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
