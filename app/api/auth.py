@@ -132,9 +132,8 @@ def google_callback(
     access_token: str = create_access_token(user_id)
 
     logger.info("google_callback: issued JWT for user_id=%d email=%s", user_id, email)
-    return {
-        "access_token": access_token,
-        "token_type":   "bearer",
-        "user_id":      user_id,
-        "email":        email,
-    }
+
+    # ── 5. Redirect to frontend with token ───────────────────────────────────
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    redirect_url = f"{frontend_url}/callback?token={access_token}&user_id={user_id}"
+    return RedirectResponse(url=redirect_url)

@@ -2,14 +2,11 @@
 sync_service.py — PlaySync Timetable Synchronisation Orchestrator
 
 Responsibilities:
+  - Fetch the user's refresh token from DB to build a per-user GCal client.
   - Fetch events + existing GCal mapping status from the DB (via repository).
   - Decide whether each event should be created, updated, or skipped.
   - Delegate all Google API calls to GoogleCalendarService.
   - Record a sync_runs audit row (PENDING → SUCCESS | FAILED).
-
-Design principle:
-  PostgreSQL is the source of truth; Google Calendar is only a mirror.
-  No GCal queries are made here — idempotency is owned by calendar_mappings.
 """
 
 import logging
@@ -38,27 +35,14 @@ class SyncSummary(TypedDict):
 # ---------------------------------------------------------------------------
 
 def _is_stale(event: dict) -> bool:
-    """
-    Return True if the event has changed since it was last synced.
-
-    An event is considered stale (needs update) when:
-      - It has never been synced (last_synced_at is None), OR
-      - Its updated_at timestamp is newer than last_synced_at.
-
-    This is an optimisation guard: if the DB row hasn't changed we skip the
-    GCal API round-trip entirely and count the event as skipped.
-    """
     last_synced_at: datetime | None = event.get("last_synced_at")
     if last_synced_at is None:
-        # No mapping row yet — should be a create, not handled here.
         return True
 
     updated_at: datetime | None = event.get("updated_at")
     if updated_at is None:
-        # No updated_at recorded; be conservative and treat as stale.
         return True
 
-    # Normalise both timestamps to UTC-aware for safe comparison.
     def _utc(dt: datetime) -> datetime:
         if dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
@@ -67,64 +51,31 @@ def _is_stale(event: dict) -> bool:
     return _utc(updated_at) > _utc(last_synced_at)
 
 
-def _handle_create(
-    gcal: GoogleCalendarService,
-    user_id: int,
-    event: dict,
-) -> None:
+def _handle_create(gcal: GoogleCalendarService, user_id: int, event: dict) -> None:
     created = gcal.create_event(event)
     google_event_id: str = created["id"]
-
     repository.insert_calendar_mapping(user_id, event["id"], google_event_id)
-
-    # 👇 thêm dòng này
     repository.update_calendar_mapping_sync_time(user_id, event["id"])
 
-def _handle_update(
-    gcal: GoogleCalendarService,
-    user_id: int,
-    event: dict,
-) -> None:
-    """Update an existing GCal event and refresh last_synced_at."""
+
+def _handle_update(gcal: GoogleCalendarService, user_id: int, event: dict) -> None:
     google_event_id: str = event["google_event_id"]
     gcal.update_event(google_event_id, event)
     repository.update_calendar_mapping_sync_time(user_id, event["id"])
-    logger.debug(
-        "Updated GCal event '%s' (google_event_id=%s) for user %d.",
-        event.get("course_name"), google_event_id, user_id,
-    )
+    logger.debug("Updated GCal event '%s' (google_event_id=%s) for user %d.",
+                 event.get("course_name"), google_event_id, user_id)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def run_sync(user_id: int, gcal=None):
+def run_sync(user_id: int, gcal=None) -> SyncSummary:
     """
-    Synchronise timetable events for *user_id* to Google Calendar.
+    Synchronise timetable events for *user_id* to their Google Calendar.
 
-    Only syncs courses the user has selected via app.user_courses.
-    If no courses are selected, falls back to all events.
-
-    Algorithm
-    ---------
-    1. Open a sync_runs audit record (status=PENDING).
-    2. Fetch events filtered by user's course selection (+ calendar_mapping status).
-    3. For each event:
-       a. No google_event_id  → create in GCal, insert mapping row.
-       b. google_event_id exists but event is stale → update in GCal.
-       c. google_event_id exists and event is up-to-date → skip.
-    4. Close the sync_runs record (status=SUCCESS or FAILED).
-    5. Return a SyncSummary dict.
-
-    Args:
-        user_id: Primary key of the user whose calendar is being synced.
-
-    Returns:
-        SyncSummary with keys: created_events, updated_events, skipped_events.
-
-    Raises:
-        Re-raises any unexpected exception after marking the run as FAILED.
+    Fetches the user's refresh token from DB to authenticate as that user,
+    so events are synced to their own calendar — not a shared service account.
     """
     run_id: int = repository.create_sync_run(user_id)
     logger.info("Sync run %d started for user %d.", run_id, user_id)
@@ -134,60 +85,47 @@ def run_sync(user_id: int, gcal=None):
 
     try:
         if gcal is None:
-            gcal = GoogleCalendarService()
+            # Fetch this user's refresh token and build a per-user GCal client
+            user = repository.get_user_by_id(user_id)
+            if user is None:
+                raise ValueError(f"User {user_id} not found.")
+
+            refresh_token: str | None = user.get("google_refresh_token")
+            if not refresh_token:
+                raise ValueError(
+                    f"User {user_id} has no refresh token. "
+                    "They need to re-authenticate via /auth/google/login."
+                )
+
+            gcal = GoogleCalendarService(refresh_token=refresh_token)
+
         events: list[dict] = repository.get_events_with_mapping_filtered(user_id)
 
         for event in events:
             google_event_id: str | None = event.get("google_event_id")
 
             if google_event_id is None:
-                # ── CREATE ──────────────────────────────────────────────────
                 _handle_create(gcal, user_id, event)
                 created += 1
-
             elif _is_stale(event):
-                # ── UPDATE ──────────────────────────────────────────────────
                 _handle_update(gcal, user_id, event)
                 updated += 1
-
             else:
-                # ── SKIP ────────────────────────────────────────────────────
-                logger.debug(
-                    "Skipping unchanged event '%s' (id=%d) for user %d.",
-                    event.get("course_name"), event["id"], user_id,
-                )
+                logger.debug("Skipping unchanged event '%s' (id=%d) for user %d.",
+                             event.get("course_name"), event["id"], user_id)
                 skipped += 1
 
         run_time = time.monotonic() - wall_start
-        repository.finish_sync_run(
-            run_id,
-            status="SUCCESS",
-            created=created,
-            updated=updated,
-            skipped=skipped,
-        )
-        logger.info(
-            "Sync run %d finished in %.2fs — created=%d, updated=%d, skipped=%d.",
-            run_id, run_time, created, updated, skipped,
-        )
+        repository.finish_sync_run(run_id, status="SUCCESS",
+                                   created=created, updated=updated, skipped=skipped)
+        logger.info("Sync run %d finished in %.2fs — created=%d, updated=%d, skipped=%d.",
+                    run_id, run_time, created, updated, skipped)
 
     except Exception:
         run_time = time.monotonic() - wall_start
-        repository.finish_sync_run(
-            run_id,
-            status="FAILED",
-            created=created,
-            updated=updated,
-            skipped=skipped,
-        )
-        logger.exception(
-            "Sync run %d FAILED after %.2fs (created=%d, updated=%d, skipped=%d).",
-            run_id, run_time, created, updated, skipped,
-        )
+        repository.finish_sync_run(run_id, status="FAILED",
+                                   created=created, updated=updated, skipped=skipped)
+        logger.exception("Sync run %d FAILED after %.2fs.", run_id, run_time)
         raise
 
-    return SyncSummary(
-        created_events=created,
-        updated_events=updated,
-        skipped_events=skipped,
-    )
+    return SyncSummary(created_events=created, updated_events=updated, skipped_events=skipped)

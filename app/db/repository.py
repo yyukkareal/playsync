@@ -371,3 +371,18 @@ def upsert_user(google_sub: str, email: str, refresh_token: str) -> int:
     user_id: int = row["id"]
     logger.info("upsert_user: user_id=%d email=%s", user_id, email)
     return user_id
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """
+    Return a single user row by primary key, or None if not found.
+
+    Args:
+        user_id: The app.users.id to look up.
+
+    Returns:
+        Dict with all users columns, or None.
+    """
+    sql = "SELECT * FROM app.users WHERE id = %(user_id)s"
+    row = _execute(sql, {"user_id": user_id}, fetch="one")
+    logger.debug("get_user_by_id: user_id=%d found=%s", user_id, row is not None)
+    return row
