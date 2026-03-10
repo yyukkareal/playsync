@@ -15,7 +15,7 @@ import requests
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
-from app.api.dependencies import create_access_token
+from app.api.dependencies import create_access_token, create_access_token_with_claims
 from app.db.repository import upsert_user
 
 logger = logging.getLogger(__name__)
@@ -118,18 +118,23 @@ def google_callback(
         logger.error("google_callback: id_token decode failed — %s", exc)
         raise HTTPException(status_code=400, detail="Invalid id_token from Google.") from exc
 
-    google_sub: str = claims["sub"]
-    email:      str = claims["email"]
+    google_sub: str       = claims["sub"]
+    email:      str       = claims["email"]
+    full_name:  str | None = claims.get("name")
 
     # ── 3. Upsert user ───────────────────────────────────────────────────────
     user_id: int = upsert_user(
         google_sub=google_sub,
         email=email,
         refresh_token=refresh_token,
+        full_name=full_name,
     )
 
-    # ── 4. Issue PlaySync JWT ────────────────────────────────────────────────
-    access_token: str = create_access_token(user_id)
+    # ── 4. Issue PlaySync JWT (includes full_name) ───────────────────────────
+    access_token: str = create_access_token_with_claims(
+        user_id=user_id,
+        extra={"email": email, "name": full_name or email},
+    )
 
     logger.info("google_callback: issued JWT for user_id=%d email=%s", user_id, email)
 

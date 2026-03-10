@@ -335,17 +335,18 @@ def get_events_with_mapping_filtered(user_id: int) -> list[dict]:
 # User management
 # ---------------------------------------------------------------------------
 
-def upsert_user(google_sub: str, email: str, refresh_token: str) -> int:
+def upsert_user(google_sub: str, email: str, refresh_token: str, full_name: str | None = None) -> int:
     """
-    Insert a new user or update their refresh_token if they already exist.
+    Insert a new user or update their refresh_token/full_name if they already exist.
 
     Uses google_sub as the conflict key — if the same Google account
-    signs in again, only the refresh_token is refreshed.
+    signs in again, refresh_token and full_name are updated.
 
     Args:
         google_sub:     Google's unique subject identifier (from id_token).
         email:          User's Google email address.
         refresh_token:  OAuth2 refresh token for offline Calendar access.
+        full_name:      Display name from Google id_token claims.
 
     Returns:
         The app.users.id of the upserted user.
@@ -354,22 +355,27 @@ def upsert_user(google_sub: str, email: str, refresh_token: str) -> int:
         RuntimeError: If the upsert does not return a row.
     """
     sql = """
-        INSERT INTO app.users (google_sub, email, google_refresh_token, created_at)
-        VALUES (%(google_sub)s, %(email)s, %(refresh_token)s, NOW())
+        INSERT INTO app.users (google_sub, email, google_refresh_token, full_name, created_at)
+        VALUES (%(google_sub)s, %(email)s, %(refresh_token)s, %(full_name)s, NOW())
         ON CONFLICT (google_sub) DO UPDATE
-            SET google_refresh_token = EXCLUDED.google_refresh_token
+            SET google_refresh_token = EXCLUDED.google_refresh_token,
+                full_name = CASE
+                    WHEN EXCLUDED.full_name IS NOT NULL AND EXCLUDED.full_name <> ''
+                    THEN EXCLUDED.full_name
+                    ELSE app.users.full_name
+                END
         RETURNING id
     """
     row: dict | None = _execute(
         sql,
-        {"google_sub": google_sub, "email": email, "refresh_token": refresh_token},
+        {"google_sub": google_sub, "email": email, "refresh_token": refresh_token, "full_name": full_name},
         fetch="one",
         commit=True,
     )
     if row is None:
         raise RuntimeError(f"upsert_user: no row returned for google_sub={google_sub!r}")
     user_id: int = row["id"]
-    logger.info("upsert_user: user_id=%d email=%s", user_id, email)
+    logger.info("upsert_user: user_id=%d email=%s full_name=%s", user_id, email, full_name)
     return user_id
 
 def get_user_by_id(user_id: int) -> dict | None:
@@ -386,3 +392,31 @@ def get_user_by_id(user_id: int) -> dict | None:
     row = _execute(sql, {"user_id": user_id}, fetch="one")
     logger.debug("get_user_by_id: user_id=%d found=%s", user_id, row is not None)
     return row
+
+
+def course_exists(course_code: str) -> bool:
+    """Return True if course_code exists in app.events."""
+    sql = "SELECT 1 FROM app.events WHERE LOWER(course_code) = LOWER(%(course_code)s) LIMIT 1"
+    row = _execute(sql, {"course_code": course_code}, fetch="one")
+    return row is not None
+
+
+def add_user_course(user_id: int, course_code: str) -> None:
+    """Add a single course to user's selection. Silently ignores duplicates."""
+    sql = """
+        INSERT INTO app.user_courses (user_id, course_code, created_at)
+        VALUES (%(user_id)s, %(course_code)s, NOW())
+        ON CONFLICT (user_id, course_code) DO NOTHING
+    """
+    _execute(sql, {"user_id": user_id, "course_code": course_code}, commit=True)
+    logger.debug("add_user_course: user=%d course=%s", user_id, course_code)
+
+
+def remove_user_course(user_id: int, course_code: str) -> None:
+    """Remove a single course from user's selection."""
+    sql = """
+        DELETE FROM app.user_courses
+        WHERE user_id = %(user_id)s AND course_code = %(course_code)s
+    """
+    _execute(sql, {"user_id": user_id, "course_code": course_code}, commit=True)
+    logger.debug("remove_user_course: user=%d course=%s", user_id, course_code)

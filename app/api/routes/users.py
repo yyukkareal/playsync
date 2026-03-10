@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.dependencies import get_current_user
-from app.db.repository import get_user_courses, set_user_courses
+from app.db.repository import get_user_courses, set_user_courses, add_user_course, course_exists
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["users"])
@@ -20,8 +20,17 @@ class CourseSelectionOut(BaseModel):
     course_codes: list[str]
 
 
+class CourseAddIn(BaseModel):
+    course_code: str
+
+
+class CourseAddOut(BaseModel):
+    user_id: int
+    course_code: str
+    message: str
+
+
 def _require_self(user_id: int, current_user: int) -> None:
-    """Raise 403 if the authenticated user is accessing another user's data."""
     if current_user != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -29,11 +38,64 @@ def _require_self(user_id: int, current_user: int) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# /me endpoints — identity from JWT, no user_id in path
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/users/me/courses",
+    response_model=CourseSelectionOut,
+    summary="Get my selected courses",
+)
+def get_my_courses(current_user: int = Depends(get_current_user)) -> CourseSelectionOut:
+    rows = get_user_courses(current_user)
+    codes = [r["course_code"] for r in rows]
+    logger.info("get_my_courses: user=%d has %d course(s).", current_user, len(codes))
+    return CourseSelectionOut(user_id=current_user, course_codes=codes)
+
+
+@router.post(
+    "/users/me/courses",
+    response_model=CourseAddOut,
+    summary="Add a single course to my selection",
+    description="Add one course by code. Duplicate codes are silently ignored.",
+)
+def add_my_course(
+    body: CourseAddIn,
+    current_user: int = Depends(get_current_user),
+) -> CourseAddOut:
+    code = body.course_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="course_code must not be empty.")
+    if not course_exists(code):
+        raise HTTPException(status_code=404, detail=f"Mã môn '{code}' không tồn tại trong hệ thống.")
+    add_user_course(current_user, code)
+    logger.info("add_my_course: user=%d added course=%s.", current_user, code)
+    return CourseAddOut(user_id=current_user, course_code=code, message="Course added.")
+
+
+@router.delete(
+    "/users/me/courses/{course_code}",
+    summary="Remove a course from my selection",
+)
+def remove_my_course(
+    course_code: str,
+    current_user: int = Depends(get_current_user),
+) -> dict:
+    from app.db.repository import remove_user_course
+    remove_user_course(current_user, course_code.strip().upper())
+    logger.info("remove_my_course: user=%d removed course=%s.", current_user, course_code)
+    return {"message": f"Course {course_code.upper()} removed."}
+
+
+# ---------------------------------------------------------------------------
+# Legacy /users/{user_id}/courses endpoints
+# ---------------------------------------------------------------------------
+
 @router.get(
     "/users/{user_id}/courses",
     response_model=CourseSelectionOut,
     summary="Get user's selected courses",
-    description="Return the list of course codes this user has selected for Google Calendar sync.",
 )
 def get_courses(
     user_id: int,
@@ -49,12 +111,7 @@ def get_courses(
 @router.post(
     "/users/{user_id}/courses",
     response_model=CourseSelectionOut,
-    summary="Set user's course selection",
-    description=(
-        "Replace the user's course selection with the provided list. "
-        "Pass an empty list to clear all. "
-        "After saving, trigger `POST /api/sync/{user_id}` to sync only these courses."
-    ),
+    summary="Set user's course selection (replace all)",
 )
 def set_courses(
     user_id: int,

@@ -33,11 +33,23 @@ _bearer_scheme = HTTPBearer()
 # ---------------------------------------------------------------------------
 
 def create_access_token(user_id: int) -> str:
+    """Sign and return a JWT containing only user_id."""
+    now = datetime.now(tz=timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "iat": now,
+        "exp": now + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def create_access_token_with_claims(user_id: int, extra: dict) -> str:
     """
-    Sign and return a JWT containing user_id and an expiry claim.
+    Sign and return a JWT with additional claims (e.g. email, name).
 
     Args:
-        user_id: The app.users.id to embed in the token.
+        user_id: The app.users.id — stored in 'sub'.
+        extra:   Dict of extra claims merged into the payload.
 
     Returns:
         A signed JWT string ready to be returned to the client.
@@ -47,6 +59,7 @@ def create_access_token(user_id: int) -> str:
         "sub": str(user_id),
         "iat": now,
         "exp": now + timedelta(hours=JWT_EXPIRE_HOURS),
+        **extra,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
