@@ -9,10 +9,11 @@ Responsibilities:
   - Record a sync_runs audit row (PENDING → SUCCESS | FAILED).
 """
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from app.db import repository
 from app.services.google_calendar import GoogleCalendarService
@@ -66,11 +67,29 @@ def _handle_update(gcal: GoogleCalendarService, user_id: int, event: dict) -> No
                  event.get("course_name"), google_event_id, user_id)
 
 
+async def _create_task(
+    gcal: GoogleCalendarService,
+    user_id: int,
+    event: dict,
+) -> Literal["created"]:
+    await asyncio.to_thread(_handle_create, gcal, user_id, event)
+    return "created"
+
+
+async def _update_task(
+    gcal: GoogleCalendarService,
+    user_id: int,
+    event: dict,
+) -> Literal["updated"]:
+    await asyncio.to_thread(_handle_update, gcal, user_id, event)
+    return "updated"
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def run_sync(user_id: int, gcal=None) -> SyncSummary:
+async def run_sync(user_id: int, gcal=None) -> SyncSummary:
     """
     Synchronise timetable events for *user_id* to their Google Calendar.
 
@@ -101,31 +120,60 @@ def run_sync(user_id: int, gcal=None) -> SyncSummary:
 
         events: list[dict] = repository.get_events_with_mapping_filtered(user_id)
 
+        tasks = []
+
         for event in events:
             google_event_id: str | None = event.get("google_event_id")
 
             if google_event_id is None:
-                _handle_create(gcal, user_id, event)
-                created += 1
+                tasks.append(_create_task(gcal, user_id, event))
             elif _is_stale(event):
-                _handle_update(gcal, user_id, event)
-                updated += 1
+                tasks.append(_update_task(gcal, user_id, event))
             else:
-                logger.debug("Skipping unchanged event '%s' (id=%d) for user %d.",
-                             event.get("course_name"), event["id"], user_id)
+                logger.debug(
+                    "Skipping unchanged event '%s' (id=%d) for user %d.",
+                    event.get("course_name"),
+                    event["id"],
+                    user_id,
+                )
                 skipped += 1
 
+        if tasks:
+            results = await asyncio.gather(*tasks)
+            created = sum(1 for r in results if r == "created")
+            updated = sum(1 for r in results if r == "updated")
+
         run_time = time.monotonic() - wall_start
-        repository.finish_sync_run(run_id, status="SUCCESS",
-                                   created=created, updated=updated, skipped=skipped)
-        logger.info("Sync run %d finished in %.2fs — created=%d, updated=%d, skipped=%d.",
-                    run_id, run_time, created, updated, skipped)
+        repository.finish_sync_run(
+            run_id,
+            status="SUCCESS",
+            created=created,
+            updated=updated,
+            skipped=skipped,
+        )
+        logger.info(
+            "Sync run %d finished in %.2fs — created=%d, updated=%d, skipped=%d.",
+            run_id,
+            run_time,
+            created,
+            updated,
+            skipped,
+        )
 
     except Exception:
         run_time = time.monotonic() - wall_start
-        repository.finish_sync_run(run_id, status="FAILED",
-                                   created=created, updated=updated, skipped=skipped)
+        repository.finish_sync_run(
+            run_id,
+            status="FAILED",
+            created=created,
+            updated=updated,
+            skipped=skipped,
+        )
         logger.exception("Sync run %d FAILED after %.2fs.", run_id, run_time)
         raise
 
-    return SyncSummary(created_events=created, updated_events=updated, skipped_events=skipped)
+    return SyncSummary(
+        created_events=created,
+        updated_events=updated,
+        skipped_events=skipped,
+    )

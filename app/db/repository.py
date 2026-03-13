@@ -255,19 +255,23 @@ def get_all_events(course_code: str | None = None) -> list[dict]:
 
 def get_user_courses(user_id: int) -> list[dict]:
     """
-    Return the list of course_codes selected by user_id.
+    Return the list of course_codes and their names selected by user_id.
 
     Args:
         user_id: Target user.
 
     Returns:
-        List of dicts with keys: id, user_id, course_code, created_at.
+        List of dicts with keys: course_code, course_name.
     """
     sql = """
-        SELECT id, user_id, course_code, created_at
-        FROM app.user_courses
-        WHERE user_id = %(user_id)s
-        ORDER BY course_code
+        SELECT 
+            uc.course_code,
+            MAX(e.course_name) AS course_name
+        FROM app.user_courses uc
+        LEFT JOIN app.events e ON LOWER(uc.course_code) = LOWER(e.course_code)
+        WHERE uc.user_id = %(user_id)s
+        GROUP BY uc.course_code
+        ORDER BY uc.course_code
     """
     rows = _execute(sql, {"user_id": user_id}, fetch="all")
     logger.debug("get_user_courses: user=%d has %d course(s).", user_id, len(rows))
@@ -420,3 +424,57 @@ def remove_user_course(user_id: int, course_code: str) -> None:
     """
     _execute(sql, {"user_id": user_id, "course_code": course_code}, commit=True)
     logger.debug("remove_user_course: user=%d course=%s", user_id, course_code)
+
+
+# ---------------------------------------------------------------------------
+# Course search
+# ---------------------------------------------------------------------------
+
+def search_courses(q: str) -> list[dict]:
+    """
+    Search courses by name or code (partial, case-insensitive).
+
+    Groups rows by course_code so each distinct class appears once,
+    with all its weekly sessions collected under 'schedules'.
+
+    Args:
+        q: Search query string, e.g. "quản trị" or "MIS".
+
+    Returns:
+        List of dicts with keys: course_code, course_name, schedules.
+        Each schedule has: weekday, start_time, end_time, room.
+        Capped at 20 distinct classes.
+    """
+    sql = """
+        SELECT course_code, course_name, weekday, start_time, end_time, room
+        FROM app.events
+        WHERE course_name ILIKE %(pattern)s
+           OR course_code ILIKE %(pattern)s
+        ORDER BY course_code, weekday, start_time
+    """
+    rows = _execute(sql, {"pattern": f"%{q.strip()}%"}, fetch="all")
+
+    # Group by course_code — each code is a distinct class section
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        code = row["course_code"]
+        if code not in grouped:
+            grouped[code] = {
+                "course_code": code,
+                "course_name": row["course_name"],
+                "schedules": [],
+            }
+        # Avoid duplicate schedules (same course can appear multiple times
+        # due to date ranges — we only need unique weekday/time/room combos)
+        schedule = {
+            "weekday": row["weekday"],
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "room": row["room"],
+        }
+        if schedule not in grouped[code]["schedules"]:
+            grouped[code]["schedules"].append(schedule)
+
+    results = list(grouped.values())[:20]
+    logger.debug("search_courses: query=%r → %d result(s).", q, len(results))
+    return results

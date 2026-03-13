@@ -27,7 +27,7 @@ class SyncResult(BaseModel):
         "Uses SHA-256 fingerprinting — unchanged events are skipped."
     ),
 )
-def sync_calendar(
+async def sync_calendar(
     user_id: int,
     current_user: int = Depends(get_current_user),
 ) -> SyncResult:
@@ -36,4 +36,4 @@ def sync_calendar(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only sync your own calendar.",
         )
-    return run_sync(user_id)
+    return await run_sync(user_id)

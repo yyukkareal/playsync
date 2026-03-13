@@ -1,34 +1,19 @@
 // src/app/layout.tsx
-import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
-import "./globals.css";
+import type { ReactNode } from 'react';
+import './globals.css';
 
-const jakarta = Plus_Jakarta_Sans({ 
-  subsets: ["latin"],
-  variable: "--font-plus-jakarta-sans",
-});
-
-export const metadata: Metadata = {
-  title: "PlaySync - Your learning, in sync",
-  description: "Automate your TMU timetable to Google Calendar",
+export const metadata = {
+  title: 'PlaySync',
+  description: 'Đồng bộ lịch học TMU vào Google Calendar',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        {/* Chèn trực tiếp link CSS vào đây */}
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-        />
-      </head>
-      <body className={`${jakarta.variable} font-display antialiased`}>
-        {children}
+    <html lang="vi">
+      <body className="min-h-screen bg-neutral-100 text-slate-900 antialiased">
+        <main className="flex min-h-screen items-center justify-center">
+          {children}
+        </main>
       </body>
     </html>
   );

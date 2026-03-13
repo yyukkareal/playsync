@@ -1,37 +1,81 @@
-# app/db/models.py
-from datetime import date, time, datetime
+# app/api/routes/events.py
+import logging
+from datetime import date, time
 
-from sqlalchemy import Integer, Text, Date, Time, DateTime
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
+
+from app.db.repository import get_all_events, search_courses
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api", tags=["events"])
 
 
-class Base(DeclarativeBase):
-    """Base class for SQLAlchemy declarative models."""
-    pass
+class EventOut(BaseModel):
+    id: int
+    course_code: str
+    course_name: str
+    weekday: int
+    start_time: time
+    end_time: time
+    room: str
+    start_date: date
+    end_date: date
+    instructor: str | None = None
+    duration: int | None = None
+    fingerprint: str
 
 
-class Event(Base):
-    __tablename__ = 'events'
-    __table_args__ = {'schema': 'app'}
+class ScheduleOut(BaseModel):
+    weekday: int
+    start_time: time
+    end_time: time
+    room: str
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    course_code: Mapped[str] = mapped_column(Text)
-    course_name: Mapped[str] = mapped_column(Text)
-    weekday: Mapped[int] = mapped_column(Integer)
-    start_time: Mapped[time] = mapped_column(Time)
-    end_time: Mapped[time] = mapped_column(Time)
-    room: Mapped[str] = mapped_column(Text)
-    start_date: Mapped[date] = mapped_column(Date)
-    end_date: Mapped[date] = mapped_column(Date)
-    fingerprint: Mapped[str] = mapped_column(Text, unique=True)
-    instructor: Mapped[str] = mapped_column(Text)
-    duration: Mapped[int] = mapped_column(Integer)
 
-class UserCourse(Base):
-    __tablename__ = 'user_courses'
-    __table_args__ = {'schema': 'app'}
+class CourseSearchResult(BaseModel):
+    course_code: str
+    course_name: str
+    schedules: list[ScheduleOut]
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer)
-    course_code: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+@router.get(
+    "/events",
+    response_model=list[EventOut],
+    summary="List timetable events",
+    description=(
+        "Return all events stored in the timetable. "
+        "Optionally filter by `course_code` (case-insensitive). "
+        "Useful for letting users browse available courses before selecting them."
+    ),
+)
+def list_events(
+    course_code: str | None = Query(
+        default=None,
+        description="Filter by course code, e.g. MIS101",
+    )
+) -> list[EventOut]:
+    rows = get_all_events(course_code=course_code)
+    logger.info("list_events: returning %d event(s) (filter=%s).", len(rows), course_code)
+    return rows
+
+
+@router.get(
+    "/courses/search",
+    response_model=list[CourseSearchResult],
+    summary="Search courses by name or code",
+    description=(
+        "Search for courses by name or code (case-insensitive, partial match). "
+        "Returns distinct classes grouped with their schedules. "
+        "Use the returned `course_code` to add to user's selection."
+    ),
+)
+def search_courses_endpoint(
+    q: str = Query(
+        min_length=1,
+        description="Search query, e.g. 'quản trị' or 'MIS'",
+    )
+) -> list[CourseSearchResult]:
+    results = search_courses(q)
+    logger.info("search_courses: query=%r returned %d result(s).", q, len(results))
+    return results

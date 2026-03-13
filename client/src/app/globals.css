@@ -1,16 +1,138 @@
 @import "tailwindcss";
 
-@theme {
-  --color-primary: #ffbf47;
-  --color-background-light: #f8f7f5;
-  --color-background-dark: #231c0f;
-  --font-display: "Plus Jakarta Sans", sans-serif;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+html,
+body {
+  padding: 0;
+  margin: 0;
 }
 
-@layer base {
-  body {
-    @apply bg-background-light text-slate-900 font-display antialiased;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.search-wrap {
+  position: relative;
+}
+
+.search-input-row {
+  position: relative;
+}
+
+.search-input {
+  width: 100%;
+  height: 48px;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #0f172a;
+  padding: 0 2.5rem 0 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: #64748b;
+}
+
+.search-input:focus {
+  border-color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.12);
+}
+
+.search-dropdown {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.875rem;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dropdown-item:last-child {
+  border-bottom: 0;
+}
+
+.dropdown-item:hover {
+  background: #f8fafc;
+}
+
+.dropdown-item.already-added {
+  opacity: 0.8;
+  cursor: default;
+}
+
+.dropdown-item-left {
+  min-width: 0;
+}
+
+.dropdown-course-name {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dropdown-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.dropdown-code {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+}
+
+.dropdown-added-badge {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: #166534;
+  background: #dcfce7;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #0f172a;
+  border-radius: 9999px;
+  animation: spin 0.7s linear infinite;
+}
+
+.search-input-row .spinner {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }

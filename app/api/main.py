@@ -1,4 +1,3 @@
-# app/api/main.py
 import logging
 
 from dotenv import load_dotenv
@@ -15,6 +14,9 @@ from app.api.routes.sync import router as sync_router
 from app.api.routes.events import router as events_router
 from app.api.routes.users import router as users_router
 from app.api.auth import router as auth_router
+
+# 1. THÊM DÒNG NÀY: Import courses_router
+from app.api.routes.courses import router as courses_router
 
 app = FastAPI(
     title="PlaySync",
@@ -37,6 +39,9 @@ app.include_router(auth_router)
 app.include_router(sync_router)
 app.include_router(events_router)
 app.include_router(users_router)
+
+# 2. THÊM DÒNG NÀY: Đăng ký courses_router vào app
+app.include_router(courses_router)
 
 
 @app.get("/health", tags=["infra"])

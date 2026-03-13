@@ -15,9 +15,14 @@ class CourseSelectionIn(BaseModel):
     course_codes: list[str]
 
 
+class CourseDetail(BaseModel):
+    code: str
+    name: str | None = None
+
+
 class CourseSelectionOut(BaseModel):
     user_id: int
-    course_codes: list[str]
+    courses: list[CourseDetail]
 
 
 class CourseAddIn(BaseModel):
@@ -49,9 +54,12 @@ def _require_self(user_id: int, current_user: int) -> None:
 )
 def get_my_courses(current_user: int = Depends(get_current_user)) -> CourseSelectionOut:
     rows = get_user_courses(current_user)
-    codes = [r["course_code"] for r in rows]
-    logger.info("get_my_courses: user=%d has %d course(s).", current_user, len(codes))
-    return CourseSelectionOut(user_id=current_user, course_codes=codes)
+    courses = [
+        CourseDetail(code=r["course_code"], name=r.get("course_name") or "Không rõ tên môn") 
+        for r in rows
+    ]
+    logger.info("get_my_courses: user=%d has %d course(s).", current_user, len(courses))
+    return CourseSelectionOut(user_id=current_user, courses=courses)
 
 
 @router.post(
@@ -103,9 +111,12 @@ def get_courses(
 ) -> CourseSelectionOut:
     _require_self(user_id, current_user)
     rows = get_user_courses(user_id)
-    codes = [r["course_code"] for r in rows]
-    logger.info("get_courses: user=%d has %d course(s).", user_id, len(codes))
-    return CourseSelectionOut(user_id=user_id, course_codes=codes)
+    courses = [
+        CourseDetail(code=r["course_code"], name=r.get("course_name") or "Không rõ tên môn") 
+        for r in rows
+    ]
+    logger.info("get_courses: user=%d has %d course(s).", user_id, len(courses))
+    return CourseSelectionOut(user_id=user_id, courses=courses)
 
 
 @router.post(
@@ -121,5 +132,13 @@ def set_courses(
     _require_self(user_id, current_user)
     codes = [c.strip().upper() for c in body.course_codes if c.strip()]
     set_user_courses(user_id, codes)
+    
+    # Lấy lại data từ DB sau khi set để đảm bảo đồng bộ tên môn
+    rows = get_user_courses(user_id)
+    courses = [
+        CourseDetail(code=r["course_code"], name=r.get("course_name") or "Không rõ tên môn") 
+        for r in rows
+    ]
+    
     logger.info("set_courses: user=%d saved %d course(s).", user_id, len(codes))
-    return CourseSelectionOut(user_id=user_id, course_codes=codes)
+    return CourseSelectionOut(user_id=user_id, courses=courses)
