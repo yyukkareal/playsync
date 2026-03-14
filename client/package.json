@@ -13,14 +13,18 @@
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "sonner": "^2.0.7",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
-    "eslint": "^9.22.0",
-    "eslint-config-next": "^16.1.6",
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "autoprefixer": "^10.4.27",
+    "eslint": "^9.22.0",
+    "eslint-config-next": "^16.1.6",
+    "postcss": "^8.5.8",
     "typescript": "latest"
   }
 }

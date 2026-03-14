@@ -31,6 +31,7 @@ REDIRECT_URI  = os.environ["GOOGLE_REDIRECT_URI"]
 SCOPES = " ".join([
     "openid",
     "email",
+    "profile",
     "https://www.googleapis.com/auth/calendar",
 ])
 
