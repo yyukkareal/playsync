@@ -50,9 +50,10 @@ def search_courses(
             et = getattr(row, "end_time", "")
             room = getattr(row, "room", "")
             weekday = getattr(row, "weekday", 1)
+        name = name.strip()
             
         # Kiểm tra logic Search
-        if keyword in code.lower() or keyword in name.lower():
+        if keyword in name.lower():
             if code not in courses_dict:
                 courses_dict[code] = {
                     "course_code": code,
@@ -77,8 +78,14 @@ def search_courses(
 
     results = list(courses_dict.values())
     
-    # Sort data theo mã môn để UI hiển thị gọn gàng
-    results.sort(key=lambda x: x["course_code"])
+    # Sort data theo mức độ khớp để UI hiển thị gọn gàng
+    def sort_key(course):
+        name_lower = course["course_name"].lower()
+        # Prefix match = priority 0, contains match = priority 1
+        priority = 0 if name_lower.startswith(keyword) else 1
+        return (priority, course["course_name"])
+
+    results.sort(key=sort_key)
     
     logger.info("search_courses: found %d courses for query '%s'", len(results), q)
     return results

@@ -20,9 +20,9 @@ from app.api.auth import router as auth_router
 from app.api.routes.courses import router as courses_router
 
 app = FastAPI(
-    title="PlaySync",
-    description="Sync TMU university timetable to Google Calendar.",
-    version="0.1.0",
+    title="luu.tkb",
+    description="Lưu thời khóa biểu TMU vào Google Calendar hoặc Apple Calendar.",
+    version="1.0.0",
 )
 
 app.add_middleware(

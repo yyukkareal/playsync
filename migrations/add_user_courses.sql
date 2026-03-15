@@ -11,5 +11,6 @@ CREATE TABLE IF NOT EXISTS app.user_courses (
     UNIQUE (user_id, course_code)
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_user_courses_user_id
     ON app.user_courses (user_id);

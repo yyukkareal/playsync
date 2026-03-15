@@ -1,52 +1,116 @@
-<div class="mt-4 px-2">
-  <div class="flex items-center gap-2 mb-3 px-2">
-    <div class="h-[1px] flex-1 bg-gray-100"></div>
-    <span class="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em]">Kết quả tìm kiếm</span>
-    <div class="h-[1px] flex-1 bg-gray-100"></div>
-  </div>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Nền Aurora mượt mà để làm nổi bật lớp kính */
+    body {
+      background: linear-gradient(45deg, #ee9ca7 0%, #ffdde1 100%);
+      min-height: screen;
+      font-family: 'Inter', sans-serif;
+    }
 
-  <div class="space-y-2">
+    /* Hiệu ứng kính mờ đặc trưng */
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+    }
+
+    .glass-input {
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(4px);
+    }
+
+    /* Nút bấm hiệu ứng kính rực rỡ */
+    .glass-btn {
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      transition: all 0.3s ease;
+    }
+
+    .glass-btn:active {
+      background: rgba(255, 255, 255, 0.8);
+      transform: scale(0.95);
+    }
+  </style>
+</head>
+<body class="p-4 flex justify-center items-start">
+
+  <div class="w-full max-w-md min-h-[90vh] flex flex-col relative py-6">
     
-    <button class="w-full grid grid-cols-[48px_1fr_60px] items-center bg-white border border-gray-100 p-3 rounded-2xl shadow-sm active:scale-[0.98] active:bg-gray-50 transition-all">
-      <div class="bg-amber-50 text-amber-700 text-[11px] font-black py-1 rounded-lg text-center">
-        T2
+    <header class="glass-panel rounded-3xl p-5 mb-8 flex justify-between items-center sticky top-0 z-50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-white/60 rounded-xl flex items-center justify-center shadow-inner">
+          <span class="text-pink-500 font-black">P</span>
+        </div>
+        <h1 class="font-bold text-gray-800 tracking-tight">PlaySync</h1>
       </div>
-      
-      <div class="text-left px-4">
-        <p class="text-sm font-bold text-[#1a1612]">12:30 – 15:00</p>
-        <p class="text-[10px] text-gray-400 font-medium uppercase tracking-tight">Ca chiều</p>
+      <button class="text-xs font-bold text-pink-600 bg-white/40 px-3 py-2 rounded-full border border-white/50">Đăng xuất</button>
+    </header>
+
+    <main class="flex-1 space-y-8 px-2">
+      <div class="text-white drop-shadow-md">
+        <h2 class="text-3xl font-black italic">Xin chào, Phúc ✨</h2>
+        <p class="text-white/80 font-medium">Lên lịch thật phong cách nhé!</p>
       </div>
 
-      <div class="text-right">
-        <span class="text-xs font-bold text-gray-400">P807</span>
+      <div class="glass-input rounded-2xl p-4 flex items-center gap-3 group focus-within:bg-white/40 transition-all">
+        <span class="text-white/70">🔍</span>
+        <input 
+          type="text" 
+          placeholder="Tìm môn học..." 
+          class="bg-transparent outline-none w-full font-semibold text-gray-800 placeholder:text-white/60"
+        />
       </div>
-    </button>
 
-    <button class="w-full grid grid-cols-[48px_1fr_60px] items-center bg-white border border-gray-100 p-3 rounded-2xl shadow-sm active:scale-[0.98] active:bg-gray-50 transition-all">
-      <div class="bg-blue-50 text-blue-700 text-[11px] font-black py-1 rounded-lg text-center">
-        T5
-      </div>
-      <div class="text-left px-4">
-        <p class="text-sm font-bold text-[#1a1612]">07:00 – 09:30</p>
-        <p class="text-[10px] text-gray-400 font-medium uppercase tracking-tight">Ca sáng</p>
-      </div>
-      <div class="text-right">
-        <span class="text-xs font-bold text-gray-400 tracking-tighter">P1007</span>
-      </div>
-    </button>
+      <div class="space-y-4">
+        <h3 class="text-[10px] font-black text-white/70 uppercase tracking-widest ml-2">Kết quả</h3>
+        
+        <div class="glass-panel rounded-[2rem] p-5 flex items-center justify-between group cursor-pointer hover:bg-white/50 transition-all">
+          <div class="flex items-center gap-4">
+            <div class="bg-white/40 w-14 h-12 rounded-2xl flex items-center justify-center text-gray-800 text-[11px] font-black border border-white/50">
+              Thứ 2
+            </div>
+            <div class="text-left">
+              <p class="text-base font-bold text-gray-800">12:30 – 15:00</p>
+              <p class="text-[10px] text-gray-600 font-bold uppercase tracking-tighter opacity-70">Phòng P.807</p>
+            </div>
+          </div>
+          <button class="glass-btn w-10 h-10 rounded-full flex items-center justify-center text-pink-500 shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+        </div>
 
-    <button class="w-full grid grid-cols-[48px_1fr_60px] items-center bg-white border border-gray-100 p-3 rounded-2xl shadow-sm active:scale-[0.98] active:bg-gray-50 transition-all border-l-4 border-l-emerald-400">
-      <div class="bg-emerald-50 text-emerald-700 text-[11px] font-black py-1 rounded-lg text-center">
-        T7
+        <div class="bg-white/60 backdrop-blur-md rounded-[2rem] p-5 flex items-center justify-between border border-pink-200/50 shadow-lg shadow-pink-200/20">
+          <div class="flex items-center gap-4">
+            <div class="bg-pink-500/80 w-14 h-12 rounded-2xl flex items-center justify-center text-white text-[11px] font-black shadow-md">
+              Thứ 5
+            </div>
+            <div class="text-left">
+              <p class="text-base font-bold text-gray-800">15:00 – 17:30</p>
+              <p class="text-[10px] text-pink-600 font-black uppercase tracking-tighter">Đã chọn</p>
+            </div>
+          </div>
+          <button class="bg-pink-500 w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg">
+             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </button>
+        </div>
       </div>
-      <div class="text-left px-4">
-        <p class="text-sm font-bold text-[#1a1612]">15:00 – 17:30</p>
-        <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-tight">Trực tuyến</p>
-      </div>
-      <div class="text-right">
-        <span class="text-[10px] font-black text-emerald-500 uppercase">Zoom</span>
-      </div>
-    </button>
+    </main>
+
+    <footer class="mt-10 px-2 sticky bottom-4">
+      <button class="w-full glass-panel py-5 rounded-[2.5rem] text-gray-800 font-black text-lg shadow-2xl hover:bg-white/60 active:scale-95 transition-all border border-white/60">
+        🚀 Đồng bộ sang Apple
+      </button>
+    </footer>
 
   </div>
-</div>
+
+</body>
+</html>

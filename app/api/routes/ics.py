@@ -46,10 +46,10 @@ def _build_ics(events: list[dict]) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//PlaySync//TMU Schedule//VI",
+        "PRODID:-//luu.tkb//TMU Schedule//VI",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        "X-WR-CALNAME:Lich hoc TMU",
+        "X-WR-CALNAME:luu.tkb — Lịch học TMU",
         "X-WR-TIMEZONE:Asia/Ho_Chi_Minh",
     ]
 

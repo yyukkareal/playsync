@@ -1,9 +1,17 @@
 // src/app/page.tsx
 'use client';
 
+import { useEffect, useState } from 'react';
 import { API_URL } from '@/lib/api';
+import { isAppleDevice } from '@/lib/device';
 
 export default function LandingPage() {
+  const [isApple, setIsApple] = useState(false);
+
+  useEffect(() => {
+    setIsApple(isAppleDevice());
+  }, []);
+
   const handleLogin = () => {
     window.location.href = `${API_URL.replace(/\/$/, '')}/auth/google/login`;
   };
@@ -67,10 +75,12 @@ export default function LandingPage() {
         style={{ animation: 'fadeUp 0.5s 0.15s ease both' }}
       >
         <h1 className="mb-2 text-2xl font-semibold tracking-tight text-slate-900">
-          Play<span className="italic">Sync</span>
+          luu<span style={{ color: '#6366f1' }}>.</span><span className="italic">tkb</span>
         </h1>
         <p className="mx-auto max-w-xs text-sm leading-relaxed text-slate-500">
-          Đồng bộ lịch học TMU vào Google Calendar hoặc Apple Calendar - chỉ trong vài giây.
+          {isApple
+            ? 'Đăng nhập bằng Google để xác thực, lịch học sẽ được xuất thẳng vào Apple Calendar.'
+            : 'Đồng bộ lịch học TMU vào Google Calendar hoặc Apple Calendar — chỉ trong vài giây.'}
         </p>
       </div>
 
@@ -121,7 +131,7 @@ export default function LandingPage() {
         <button
           type="button"
           onClick={handleLogin}
-          className="flex w-full items-center justify-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 active:scale-[0.99]"
+          className="relative z-10 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 active:scale-[0.99]"
         >
           <img
             src="https://www.gstatic.com/images/branding/product/1x/gsa_512dp.png"
