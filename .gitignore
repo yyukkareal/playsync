@@ -3,13 +3,17 @@
 .env.local
 .env.*.local
 client_secrets.json
+*.pem
+*.key
 
 # ── Database dumps ──────────────────────────────────────────────────────────
 *.sql
 !migrations/*.sql
+*.dump
 
 # ── Python ──────────────────────────────────────────────────────────────────
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -20,17 +24,32 @@ __pycache__/
 build/
 dist/
 lib/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # ── Node / Next.js ──────────────────────────────────────────────────────────
 node_modules/
-client/.next/
-client/out/
-client/.env.local
-client/.env.*.local
+.next/
+out/
+.env.local
+.env.*.local
+
+# ── Docker ──────────────────────────────────────────────────────────────────
+docker-compose.override.yml
 
 # ── Excel / data files ──────────────────────────────────────────────────────
 timetable.xlsx
+*.xlsx
+!migrations/*.xlsx
 
 # ── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ── Editor ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
