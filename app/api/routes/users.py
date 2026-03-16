@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.dependencies import get_current_user
-from app.db.repository import get_user_courses, set_user_courses, add_user_course, course_exists
+from app.db.repository import get_user_courses, set_user_courses, add_user_course, course_exists, get_user_by_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["users"])
@@ -13,6 +13,12 @@ router = APIRouter(prefix="/api", tags=["users"])
 
 class CourseSelectionIn(BaseModel):
     course_codes: list[str]
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    full_name: str | None = None
 
 
 class CourseDetail(BaseModel):
@@ -46,6 +52,22 @@ def _require_self(user_id: int, current_user: int) -> None:
 # ---------------------------------------------------------------------------
 # /me endpoints — identity from JWT, no user_id in path
 # ---------------------------------------------------------------------------
+
+@router.get(
+    "/users/me",
+    response_model=UserOut,
+    summary="Get my user profile",
+)
+def get_my_profile(current_user: int = Depends(get_current_user)) -> UserOut:
+    user = get_user_by_id(current_user)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return UserOut(
+        id=user["id"],
+        email=user["email"],
+        full_name=user.get("full_name"),
+    )
+
 
 @router.get(
     "/users/me/courses",

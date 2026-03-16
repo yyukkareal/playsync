@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { clearToken, getToken, setToken } from '@/lib/api';
+import { clearToken, getToken } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 type AuthStatus = 'loading' | 'error';
 
@@ -37,6 +38,7 @@ function safeRemoveLocalStorage(key: string): void {
 function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { login } = useAuth();
   const processedRef = useRef(false);
   const redirectTimerRef = useRef<number | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
@@ -78,17 +80,12 @@ function AuthCallbackContent() {
       return;
     }
 
-    setToken(token);
-    if (getToken() !== token) {
-      fail('Không thể lưu phiên đăng nhập trên trình duyệt này.');
-      return;
-    }
-
     if (!safeSetLocalStorage('user_id', userId)) {
       fail('Không thể lưu thông tin người dùng.');
       return;
     }
 
+    login(token, userId);
     router.replace('/courses');
 
     return () => {

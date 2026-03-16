@@ -4,30 +4,12 @@ import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { clearToken, fetchAPI } from '@/lib/api';
+import { fetchAPI } from '@/lib/api';
 import { useCourses } from '@/hooks/useCourses';
 import { SearchBox } from '@/components/courses/SearchBox';
 import type { Course, SelectedCourse } from '@/types/course';
 import { isAppleDevice } from '@/lib/device';
-
-function getDisplayName(): string {
-  if (typeof window === 'undefined') return '';
-  try {
-    const token = localStorage.getItem('playsync_token');
-    if (!token) return '';
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const name: string = payload.name ?? '';
-    const email: string = payload.email ?? '';
-    // Use name only if it looks like a real name (not an email address)
-    if (name && !name.includes('@')) {
-      return name;
-    }
-    // Fallback to email prefix
-    return email.split('@')[0];
-  } catch {
-    return '';
-  }
-}
+import { useAuth } from '@/context/AuthContext';
 
 const COURSE_COLORS = [
   'bg-blue-100 text-blue-800',
@@ -194,9 +176,9 @@ export default function CoursesDashboardPage() {
   }
 
   const router = useRouter();
+  const { user, loading: authLoading, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [isApple, setIsApple] = useState(false);
-  const [displayName, setDisplayName] = useState('');
   const [addingCode, setAddingCode] = useState<string | null>(null);
   const [removingCode, setRemovingCode] = useState<string | null>(null);
   const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number }>>([]);
@@ -224,18 +206,15 @@ export default function CoursesDashboardPage() {
     [courses],
   );
 
-  // Simple auth guard based on presence of token in storage
+  // Auth guard based on AuthContext
   useEffect(() => {
     setMounted(true);
     setIsApple(isAppleDevice());
-    setDisplayName(getDisplayName());
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('playsync_token')
-      : null;
-    if (!token) {
+    
+    if (!authLoading && !user) {
       router.replace('/');
     }
-  }, [router]);
+  }, [user, authLoading, router]);
 
   const handleSelect = async (course: Course) => {
     setAddingCode(course.course_code);
@@ -256,18 +235,12 @@ export default function CoursesDashboardPage() {
   };
 
   const handleSync = async () => {
-    if (courses.length === 0) return;
-
-    const userId =
-      typeof window !== 'undefined'
-        ? localStorage.getItem('user_id')
-        : null;
-    if (!userId) return;
+    if (courses.length === 0 || !user) return;
 
     setIsSyncing(true);
     try {
       const res = await fetchAPI(
-        `/api/sync/${encodeURIComponent(userId)}`,
+        `/api/sync/${encodeURIComponent(user.id)}`,
         {
           method: 'POST',
         },
@@ -327,25 +300,17 @@ export default function CoursesDashboardPage() {
   };
 
   const handleLogout = () => {
-    clearToken();
-    try {
-      localStorage.removeItem('user_id');
-    } catch {
-      // ignore
-    }
+    logout();
     router.push('/');
   };
 
   const handleExportIcs = async () => {
-    const userId = typeof window !== 'undefined'
-      ? localStorage.getItem('user_id')
-      : null;
-    if (!userId) return;
+    if (!user) return;
 
     setIsSyncing(true);
     try {
       const res = await fetchAPI(
-        `/api/ics/${encodeURIComponent(userId)}`
+        `/api/ics/${encodeURIComponent(user.id)}`
       );
       if (!res.ok) throw new Error('Export thất bại');
 
@@ -377,8 +342,12 @@ export default function CoursesDashboardPage() {
     action();
   };
 
-  if (!mounted) {
-    return <div className="min-h-screen bg-neutral-100" />;
+  if (!mounted || authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-100">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-slate-900" />
+      </div>
+    );
   }
 
   return (
@@ -392,9 +361,9 @@ export default function CoursesDashboardPage() {
           <div className="truncate text-base font-semibold tracking-tight text-slate-900">
             luu<span style={{ color: '#6366f1' }}>.</span><span className="italic">tkb</span>
           </div>
-          {displayName && (
+          {user && (
             <div className="truncate text-xs text-slate-400">
-              Xin chào, {displayName}
+              Xin chào, {user.full_name || user.email.split('@')[0]}
             </div>
           )}
         </div>

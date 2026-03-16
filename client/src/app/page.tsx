@@ -1,18 +1,26 @@
-// src/app/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { API_URL } from '@/lib/api';
 import { isAppleDevice } from '@/lib/device';
+import { useAuth } from '@/context/AuthContext';
 
 export default function LandingPage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
   const [isApple, setIsApple] = useState(false);
 
   useEffect(() => {
     setIsApple(isAppleDevice());
-  }, []);
+    if (!loading && user) {
+      router.replace('/courses');
+    }
+  }, [user, loading, router]);
 
   const handleLogin = () => {
+...
+
     window.location.href = `${API_URL.replace(/\/$/, '')}/auth/google/login`;
   };
 
