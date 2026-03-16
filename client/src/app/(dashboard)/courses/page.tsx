@@ -4,11 +4,10 @@ import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { clearToken } from '@/lib/api';
+import { clearToken, fetchAPI } from '@/lib/api';
 import { useCourses } from '@/hooks/useCourses';
 import { SearchBox } from '@/components/courses/SearchBox';
 import type { Course, SelectedCourse } from '@/types/course';
-import { API_URL, getHeaders } from '@/lib/api';
 import { isAppleDevice } from '@/lib/device';
 
 function getDisplayName(): string {
@@ -267,11 +266,10 @@ export default function CoursesDashboardPage() {
 
     setIsSyncing(true);
     try {
-      const res = await fetch(
-        `${API_URL}/api/sync/${encodeURIComponent(userId)}`,
+      const res = await fetchAPI(
+        `/api/sync/${encodeURIComponent(userId)}`,
         {
           method: 'POST',
-          headers: getHeaders(),
         },
       );
 
@@ -293,9 +291,8 @@ export default function CoursesDashboardPage() {
 
           // Fallback: search by course code to get schedules
           try {
-            const res = await fetch(
-              `${API_URL}/api/courses/search?q=${encodeURIComponent(c.code)}`,
-              { headers: getHeaders() },
+            const res = await fetchAPI(
+              `/api/courses/search?q=${encodeURIComponent(c.code)}`
             );
             if (!res.ok) return { course: c, schedules: [] };
             const data = await res.json();
@@ -347,9 +344,8 @@ export default function CoursesDashboardPage() {
 
     setIsSyncing(true);
     try {
-      const res = await fetch(
-        `${API_URL}/api/ics/${encodeURIComponent(userId)}`,
-        { headers: getHeaders() },
+      const res = await fetchAPI(
+        `/api/ics/${encodeURIComponent(userId)}`
       );
       if (!res.ok) throw new Error('Export thất bại');
 

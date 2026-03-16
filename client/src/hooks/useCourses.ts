@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { API_URL, getHeaders } from '@/lib/api';
+import { fetchAPI } from '@/lib/api';
 import { SelectedCourse } from '@/types/course';
 
 export function useCourses() {
@@ -11,9 +11,7 @@ export function useCourses() {
 
   const fetchCourses = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/users/me/courses`, {
-        headers: getHeaders(),
-      });
+      const res = await fetchAPI('/api/users/me/courses');
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setCourses(data.courses || []);
@@ -30,9 +28,8 @@ export function useCourses() {
 
   const addCourse = async (code: string, name: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/users/me/courses`, {
+      const res = await fetchAPI('/api/users/me/courses', {
         method: 'POST',
-        headers: getHeaders(),
         body: JSON.stringify({ course_code: code }),
       });
       
@@ -49,9 +46,8 @@ export function useCourses() {
 
   const removeCourse = async (code: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/users/me/courses/${code}`, {
+      const res = await fetchAPI(`/api/users/me/courses/${code}`, {
         method: 'DELETE',
-        headers: getHeaders(),
       });
       if (res.ok) {
         setCourses(prev => prev.filter(c => c.code !== code));

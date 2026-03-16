@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { API_URL, getHeaders } from '@/lib/api';
+import { fetchAPI } from '@/lib/api';
 import { Course } from '@/types/course';
 
 export function useSearch(query: string) {
@@ -36,8 +36,7 @@ export function useSearch(query: string) {
       }
       setIsSearching(true);
       try {
-        const res = await fetch(`${API_URL}/api/courses/search?q=${encodeURIComponent(q)}`, {
-          headers: getHeaders(),
+        const res = await fetchAPI(`/api/courses/search?q=${encodeURIComponent(q)}`, {
           signal: controller.signal,
         });
         
