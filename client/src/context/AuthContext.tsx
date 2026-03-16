@@ -12,7 +12,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (token: string, userId: string) => void;
+  login: (token: string, userId: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -24,12 +24,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshUser = async () => {
+    setLoading(true);
+    console.log("AUTH_CONTEXT_FETCH_USER");
     try {
       const res = await fetchAPI('/api/users/me');
+      console.log("AUTH_USER_RESPONSE_STATUS", res.status);
       if (res.ok) {
         const data = await res.json();
+        console.log("AUTH_USER_RESPONSE_DATA", data);
         setUser(data);
       } else {
+        console.warn("AUTH_USER_RESPONSE_NOT_OK");
         setUser(null);
       }
     } catch (error) {
@@ -44,12 +49,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshUser();
   }, []);
 
-  const login = (token: string, userId: string) => {
+  const login = async (token: string, userId: string) => {
     setToken(token);
     if (typeof window !== 'undefined') {
       localStorage.setItem('user_id', userId);
     }
-    refreshUser();
+    await refreshUser();
   };
 
   const logout = () => {

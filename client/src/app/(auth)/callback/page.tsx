@@ -85,8 +85,10 @@ function AuthCallbackContent() {
       return;
     }
 
-    login(token, userId);
-    router.replace('/courses');
+    (async () => {
+      await login(token, userId);
+      router.replace('/courses');
+    })();
 
     return () => {
       if (redirectTimerRef.current) {
