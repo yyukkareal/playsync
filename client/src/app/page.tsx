@@ -13,7 +13,11 @@ export default function LandingPage() {
 
   useEffect(() => {
     setIsApple(isAppleDevice());
+    
+    console.log("AUTH_CHECK_LANDING", { user, loading, mounted: true });
+
     if (!loading && user) {
+      console.log("REDIRECT_TRIGGERED", { path: "/", to: "/courses", reason: "User already authenticated" });
       router.replace('/courses');
     }
   }, [user, loading, router]);

@@ -211,7 +211,10 @@ export default function CoursesDashboardPage() {
     setMounted(true);
     setIsApple(isAppleDevice());
     
+    console.log("AUTH_CHECK_DASHBOARD", { user, authLoading, mounted: true });
+
     if (!authLoading && !user) {
+      console.log("REDIRECT_TRIGGERED", { path: "/courses", to: "/", reason: "No user authenticated" });
       router.replace('/');
     }
   }, [user, authLoading, router]);
