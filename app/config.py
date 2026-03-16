@@ -25,5 +25,8 @@ class Settings:
     # Timezone
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Ho_Chi_Minh")
 
+    # Frontend URL (for CORS)
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
 
 settings = Settings()

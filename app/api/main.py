@@ -10,6 +10,7 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
 from app.api.routes.sync import router as sync_router
 from app.api.routes.events import router as events_router
 from app.api.routes.users import router as users_router
@@ -25,12 +26,21 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# ── CORS Setup ─────────────────────────────────────────────────────────────
+# In production, set FRONTEND_URL to https://luutkb.vercel.app
+origins = [
+    settings.FRONTEND_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000", # local backend for testing
+]
+
+# Filter out empty or None origins
+allowed_origins = [o for o in origins if o and o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
