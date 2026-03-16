@@ -12,7 +12,7 @@ import os
 
 import jwt
 import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import create_access_token, create_access_token_with_claims
@@ -20,6 +20,12 @@ from app.db.repository import upsert_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ── Networking Setup ───────────────────────────────────────────────────────
+# We use a persistent session with trust_env=False to avoid issues with
+# container network proxies and force cleaner IPv4/IPv6 behaviour.
+http_client = requests.Session()
+http_client.trust_env = False
 
 # ---------------------------------------------------------------------------
 # OAuth config — all values must be set in environment
@@ -81,17 +87,24 @@ def google_callback(
     code: str = Query(..., description="Authorization code returned by Google"),
 ) -> dict:
     # ── 1. Exchange code for tokens ─────────────────────────────────────────
-    token_resp = requests.post(
-        GOOGLE_TOKEN_URL,
-        data={
-            "code":          code,
-            "client_id":     CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "redirect_uri":  REDIRECT_URI,
-            "grant_type":    "authorization_code",
-        },
-        timeout=10,
-    )
+    try:
+        token_resp = http_client.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "code":          code,
+                "client_id":     CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "redirect_uri":  REDIRECT_URI,
+                "grant_type":    "authorization_code",
+            },
+            timeout=10,
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error("google_callback: network error during token exchange — %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not reach Google identity servers (Network unreachable).",
+        ) from exc
 
     if not token_resp.ok:
         logger.error("google_callback: token exchange failed — %s", token_resp.text)
