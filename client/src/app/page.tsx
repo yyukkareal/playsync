@@ -23,8 +23,6 @@ export default function LandingPage() {
   }, [user, loading, router]);
 
   const handleLogin = () => {
-...
-
     window.location.href = `${API_URL.replace(/\/$/, '')}/auth/google/login`;
   };
 
