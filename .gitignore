@@ -24,8 +24,8 @@ __pycache__/
 build/
 dist/
 lib/
+!client/src/lib/
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
 
 # ── Node / Next.js ──────────────────────────────────────────────────────────

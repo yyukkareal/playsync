@@ -121,7 +121,3 @@ Pull requests và issues đều được chào đón. Xem [CONTRIBUTING.md](CONT
 ## Giấy phép
 
 MIT License — xem [LICENSE](LICENSE)
-
----
-
-_Dự án được phát triển bởi sinh viên Khoa Hệ thống thông tin quản lý, Trường Đại học Thương mại._
