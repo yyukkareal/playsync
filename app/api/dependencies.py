@@ -15,7 +15,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ JWT_SECRET: str = os.environ["JWT_SECRET"]
 JWT_ALGORITHM: str = "HS256"
 JWT_EXPIRE_HOURS: int = 72  # 3 days — reasonable for an MVP session
 
-_bearer_scheme = HTTPBearer()
+_bearer_scheme = HTTPBearer(auto_error=False)
 
 # ---------------------------------------------------------------------------
 # Token creation
@@ -69,10 +69,11 @@ def create_access_token_with_claims(user_id: int, extra: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> int:
     """
-    FastAPI dependency — extract and verify a Bearer JWT.
+    FastAPI dependency — extract and verify a Bearer JWT or Cookie.
 
     Raises HTTP 401 if the token is missing, expired, or tampered with.
 
@@ -85,9 +86,19 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    token = None
+    if credentials:
+        token = credentials.credentials
+    else:
+        # Fallback to cookie for cross-site requests (Vercel -> Railway)
+        token = request.cookies.get("access_token")
+
+    if not token:
+        raise credentials_exception
+
     try:
         payload = jwt.decode(
-            credentials.credentials,
+            token,
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
         )

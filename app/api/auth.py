@@ -155,4 +155,19 @@ def google_callback(
     # ── 5. Redirect to frontend with token ───────────────────────────────────
     frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
     redirect_url = f"{frontend_url}/callback?token={access_token}&user_id={user_id}"
-    return RedirectResponse(url=redirect_url)
+    
+    response = RedirectResponse(url=redirect_url)
+    
+    # Set the JWT as a cookie for cross-domain requests
+    # samesite="none" + secure=True allows the cookie to be sent from Vercel to Railway
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=60 * 60 * 24 * 7,  # 7 days
+        path="/",
+    )
+    
+    return response
